@@ -104,6 +104,9 @@ Only after this: state the task is complete.
 - Passing hardcoded empty arguments (`&[]`, `vec![]`, `""`, `None`) to a parameter whose purpose is to carry real computed data — the function call exists but the real input is silently omitted
 - Struct fields that are initialized to empty (`Vec::new()`, `None`, `0`) at construction and never written to again for the rest of the program's lifetime
 - Methods that are fully implemented and compile correctly but are never called from the main execution path (dead-end methods: exist in isolation, never wired into the workflow)
+- Named placeholder functions like `render_placeholder(frame, "Feature Name")` — a helper that renders a "coming soon" screen bypasses grep stub detection entirely; every UI view must render real interactive content
+- `.unwrap_or_default()` or `.unwrap_or("")` used to silently convert errors into empty values — error information is lost and debugging becomes impossible; use `?` or explicit error mapping instead
+- An entire subsystem (e.g., all Agent/AI/Coordinator code) that is implemented and tested in isolation but never called from the application's main entry path — unit tests passing for individual components does NOT mean the system works end-to-end
 
 ### Node.js / TypeScript
 - `throw new Error("not implemented")`
@@ -181,6 +184,9 @@ Only after this: state the task is complete.
 - `#[ignore]` on a test is forbidden unless accompanied by a comment explaining the external dependency that makes it unrunnable
 - Empty test bodies `#[test] fn test_x() {}` and trivially-true tests `assert!(true)` are forbidden
 - `cargo test` must show at least one passing test per non-trivial module; `running 0 tests` is a FAILURE even when exit code is 0
+- Tests that only verify construction (`let _x = Foo::new()`) or compilation (`let _ = some_fn`) without calling methods or asserting output are NOT real tests — they are fake tests that inflate test count
+- A high test count (50+) does NOT imply correctness: if all tests are unit tests for isolated components but no test exercises the main workflow end-to-end, the project is NOT complete. At least one integration test must call the top-level entry function and assert meaningful output
+- Every project with a UI layer must have at least one headless smoke test that bypasses the UI entirely and calls the core business logic directly with a mock/stub external dependency (e.g., mock LLM client). This test must: (1) call the top-level coordinator/orchestrator, (2) pass data through every major subsystem, (3) assert that the final output is non-empty and structurally valid. If this test cannot be written, it means the subsystems are not actually connected.
 
 ### Node.js / TypeScript Specifics
 - Every function must have complete implementation
@@ -218,6 +224,7 @@ Only after this: state the task is complete.
 - Prefer `?` operator over `.unwrap()`
 - Use `thiserror` for library errors
 - Use `anyhow` for application errors
+- Never use `.unwrap_or_default()` or `.unwrap_or("")` to silently discard error information — if an operation can fail, propagate the error with `?` or map it to a meaningful error type
 
 ### Node.js / TypeScript
 - Async: always use try/catch or .catch()
@@ -251,6 +258,8 @@ Before saying any variant of "done", "complete", "finished", "implemented":
 10. For every function that reads external data and populates a struct: are ALL relevant fields populated, not just 1-2?
 11. Does the main execution path actually call every Agent/Manager/Handler that was created? Trace the call graph — if an object is constructed but none of its methods appear downstream, it is dead.
 12. Are all function arguments carrying real computed data? Any argument that is hardcoded to empty (`&[]`, `None`, `""`) at every call site means the feature it represents is silently disabled.
+13. Is there at least one end-to-end integration test that calls the application's main workflow and asserts the final output? Unit tests alone are not sufficient proof of completion.
+14. Does every UI screen/view render real interactive content? Any view that calls a placeholder/stub render function (regardless of its name) is an unimplemented screen.
 
 If the answer to ANY of the above is "no": do not report completion.
 
