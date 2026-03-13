@@ -1,0 +1,35 @@
+{
+  "name": "minimax-precision-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for precise code analysis and MiniMax-optimized prompt generation",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src/ --max-warnings 0"
+  },
+  "keywords": ["mcp", "minimax", "code-analysis", "static-analysis"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "tree-sitter": "^0.21.0",
+    "tree-sitter-rust": "^0.21.0",
+    "tree-sitter-go": "^0.21.0",
+    "tree-sitter-java": "^0.21.0",
+    "tree-sitter-typescript": "^0.21.0",
+    "tree-sitter-python": "^0.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "eslint": "^8.0.0",
+    "typescript": "^5.3.0",
+    "vitest": "^1.0.0"
+  }
+}

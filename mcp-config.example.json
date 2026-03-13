@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "minimax-precision": {
+      "command": "node",
+      "args": ["E:/Claude/minimax-precision-mcp/dist/index.js"],
+      "env": {
+        "LOG_LEVEL": "info"
+      },
+      "disabled": false,
+      "autoApprove": [
+        "analyze_function",
+        "scan_placeholders"
+      ]
+    }
+  }
+}
