@@ -35,7 +35,9 @@ export type IssueType =
   | "empty_function"
   | "placeholder_return"
   | "ignored_error"
-  | "dead_code";
+  | "dead_code"
+  | "error_handling"
+  | "missing_dependency";
 
 export interface Issue {
   type: IssueType;
@@ -43,6 +45,14 @@ export interface Issue {
   location: Location;
   message: string;
   details: Record<string, unknown>;
+}
+
+export interface AnalysisIssue {
+  type: IssueType;
+  message: string;
+  location: { file: string; line: number };
+  severity: "critical" | "error" | "warning";
+  suggestion: string;
 }
 
 export interface AnalysisReport {

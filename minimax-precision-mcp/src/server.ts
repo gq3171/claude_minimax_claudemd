@@ -8,6 +8,9 @@ import { LanguageDetector } from "./utils/language-detector.js";
 import { PlaceholderAnalyzer } from "./analyzers/placeholder.js";
 import { ParameterAnalyzer } from "./analyzers/parameter.js";
 import { DataFlowAnalyzer } from "./analyzers/dataflow.js";
+import { ErrorHandlingAnalyzer } from "./analyzers/error-handling.js";
+import { DeadCodeAnalyzer } from "./analyzers/dead-code.js";
+import { DependencyAnalyzer } from "./analyzers/dependency.js";
 import { PromptGenerator } from "./prompts/generator.js";
 import { AnalysisReport } from "./types.js";
 import * as fs from "fs";
@@ -19,6 +22,9 @@ export class MinimaxPrecisionServer {
   private placeholderAnalyzer: PlaceholderAnalyzer;
   private parameterAnalyzer: ParameterAnalyzer;
   private dataFlowAnalyzer: DataFlowAnalyzer;
+  private errorHandlingAnalyzer: ErrorHandlingAnalyzer;
+  private deadCodeAnalyzer: DeadCodeAnalyzer;
+  private dependencyAnalyzer: DependencyAnalyzer;
   private promptGenerator: PromptGenerator;
 
   constructor() {
@@ -38,6 +44,9 @@ export class MinimaxPrecisionServer {
     this.placeholderAnalyzer = new PlaceholderAnalyzer();
     this.parameterAnalyzer = new ParameterAnalyzer();
     this.dataFlowAnalyzer = new DataFlowAnalyzer();
+    this.errorHandlingAnalyzer = new ErrorHandlingAnalyzer();
+    this.deadCodeAnalyzer = new DeadCodeAnalyzer();
+    this.dependencyAnalyzer = new DependencyAnalyzer();
     this.promptGenerator = new PromptGenerator();
 
     this.setupHandlers();
@@ -92,6 +101,39 @@ export class MinimaxPrecisionServer {
             required: ["file_path", "function_name"],
           },
         },
+        {
+          name: "check_error_handling",
+          description: "检查错误处理问题（.unwrap_or_default, .unwrap_or(\"\") 等）",
+          inputSchema: {
+            type: "object",
+            properties: {
+              file_path: { type: "string", description: "文件路径" },
+            },
+            required: ["file_path"],
+          },
+        },
+        {
+          name: "detect_dead_code",
+          description: "检测未被调用的函数（死代码）",
+          inputSchema: {
+            type: "object",
+            properties: {
+              file_path: { type: "string", description: "文件路径" },
+            },
+            required: ["file_path"],
+          },
+        },
+        {
+          name: "check_dependencies",
+          description: "检查函数依赖关系（调用但未定义的函数）",
+          inputSchema: {
+            type: "object",
+            properties: {
+              file_path: { type: "string", description: "文件路径" },
+            },
+            required: ["file_path"],
+          },
+        },
       ],
     }));
 
@@ -107,6 +149,12 @@ export class MinimaxPrecisionServer {
           return this.handleTraceDataFlow(args as any);
         case "validate_implementation":
           return this.handleValidateImplementation(args as any);
+        case "check_error_handling":
+          return this.handleCheckErrorHandling(args as any);
+        case "detect_dead_code":
+          return this.handleDetectDeadCode(args as any);
+        case "check_dependencies":
+          return this.handleCheckDependencies(args as any);
         default:
           throw new Error(`Unknown tool: ${name}`);
       }
@@ -245,6 +293,51 @@ export class MinimaxPrecisionServer {
             null,
             2
           ),
+        },
+      ],
+    };
+  }
+
+  private async handleCheckErrorHandling(args: { file_path: string }) {
+    const { file_path } = args;
+    const sourceCode = fs.readFileSync(file_path, 'utf-8');
+    const issues = this.errorHandlingAnalyzer.analyze(sourceCode, file_path);
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({ error_handling_issues: issues }, null, 2),
+        },
+      ],
+    };
+  }
+
+  private async handleDetectDeadCode(args: { file_path: string }) {
+    const { file_path } = args;
+    const sourceCode = fs.readFileSync(file_path, 'utf-8');
+    const issues = this.deadCodeAnalyzer.analyze(sourceCode, file_path);
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({ dead_code_issues: issues }, null, 2),
+        },
+      ],
+    };
+  }
+
+  private async handleCheckDependencies(args: { file_path: string }) {
+    const { file_path } = args;
+    const sourceCode = fs.readFileSync(file_path, 'utf-8');
+    const issues = this.dependencyAnalyzer.analyze(sourceCode, file_path);
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({ dependency_issues: issues }, null, 2),
         },
       ],
     };
