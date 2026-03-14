@@ -162,185 +162,269 @@ export class MinimaxPrecisionServer {
   }
 
   private async handleAnalyzeFunction(args: { file_path: string; function_name: string }) {
-    const { file_path, function_name } = args;
-    const functions = this.languageDetector.parseFile(file_path);
-    const targetFunc = functions.find((f) => f.name === function_name);
+    try {
+      const { file_path, function_name } = args;
+      const functions = this.languageDetector.parseFile(file_path);
+      const targetFunc = functions.find((f) => f.name === function_name);
 
-    if (!targetFunc) {
+      if (!targetFunc) {
+        return {
+          content: [{ type: "text", text: `函数 '${function_name}' 未找到` }],
+        };
+      }
+
+      const placeholderIssues = this.placeholderAnalyzer.analyze(targetFunc);
+      const parameterIssues = this.parameterAnalyzer.analyze(targetFunc);
+      const allIssues = [...placeholderIssues, ...parameterIssues];
+
+      const report: AnalysisReport = {
+        function: targetFunc,
+        issues: allIssues,
+        context: { callers: [], callees: [] },
+      };
+
+      const prompt = this.promptGenerator.generate(report);
+
       return {
-        content: [{ type: "text", text: `函数 '${function_name}' 未找到` }],
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                issues: allIssues,
+                precise_prompt: prompt.prompt,
+                metadata: prompt.metadata,
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ error: `Failed to analyze function: ${error}` }, null, 2),
+          },
+        ],
+        isError: true,
       };
     }
-
-    const placeholderIssues = this.placeholderAnalyzer.analyze(targetFunc);
-    const parameterIssues = this.parameterAnalyzer.analyze(targetFunc);
-    const allIssues = [...placeholderIssues, ...parameterIssues];
-
-    const report: AnalysisReport = {
-      function: targetFunc,
-      issues: allIssues,
-      context: { callers: [], callees: [] },
-    };
-
-    const prompt = this.promptGenerator.generate(report);
-
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(
-            {
-              issues: allIssues,
-              precise_prompt: prompt.prompt,
-              metadata: prompt.metadata,
-            },
-            null,
-            2
-          ),
-        },
-      ],
-    };
   }
 
   private async handleScanPlaceholders(args: { path: string }) {
-    const { path: scanPath } = args;
-    const files = this.findSourceFiles(scanPath);
-    const allIssues: Array<{ file: string; line: number; function: string; type: string }> = [];
+    try {
+      const { path: scanPath } = args;
+      const files = this.findSourceFiles(scanPath);
+      const allIssues: Array<{ file: string; line: number; function: string; type: string }> = [];
 
-    for (const file of files) {
-      const functions = this.languageDetector.parseFile(file);
-      for (const func of functions) {
-        const issues = this.placeholderAnalyzer.analyze(func);
-        for (const issue of issues) {
-          allIssues.push({
-            file: func.filePath,
-            line: func.lineNumber,
-            function: func.name,
-            type: issue.type,
-          });
+      for (const file of files) {
+        const functions = this.languageDetector.parseFile(file);
+        for (const func of functions) {
+          const issues = this.placeholderAnalyzer.analyze(func);
+          for (const issue of issues) {
+            allIssues.push({
+              file: func.filePath,
+              line: func.lineNumber,
+              function: func.name,
+              type: issue.type,
+            });
+          }
         }
       }
-    }
 
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(
-            {
-              placeholders: allIssues,
-              statistics: {
-                total_files: files.length,
-                placeholder_count: allIssues.length,
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                placeholders: allIssues,
+                statistics: {
+                  total_files: files.length,
+                  placeholder_count: allIssues.length,
+                },
               },
-            },
-            null,
-            2
-          ),
-        },
-      ],
-    };
+              null,
+              2
+            ),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ error: `Failed to scan placeholders: ${error}` }, null, 2),
+          },
+        ],
+        isError: true,
+      };
+    }
   }
 
   private async handleTraceDataFlow(args: { file_path: string }) {
-    const { file_path } = args;
-    const functions = this.languageDetector.parseFile(file_path);
-    const issues = this.dataFlowAnalyzer.analyzeFile(file_path, functions);
+    try {
+      const { file_path } = args;
+      const functions = this.languageDetector.parseFile(file_path);
+      const issues = this.dataFlowAnalyzer.analyzeFile(file_path, functions);
 
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify({ dead_code: issues }, null, 2),
-        },
-      ],
-    };
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ dead_code: issues }, null, 2),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ error: `Failed to trace data flow: ${error}` }, null, 2),
+          },
+        ],
+        isError: true,
+      };
+    }
   }
 
   private async handleValidateImplementation(args: { file_path: string; function_name: string }) {
-    const { file_path, function_name } = args;
-    const functions = this.languageDetector.parseFile(file_path);
-    const targetFunc = functions.find((f) => f.name === function_name);
+    try {
+      const { file_path, function_name } = args;
+      const functions = this.languageDetector.parseFile(file_path);
+      const targetFunc = functions.find((f) => f.name === function_name);
 
-    if (!targetFunc) {
+      if (!targetFunc) {
+        return {
+          content: [{ type: "text", text: `函数 '${function_name}' 未找到` }],
+        };
+      }
+
+      const placeholderIssues = this.placeholderAnalyzer.analyze(targetFunc);
+      const parameterIssues = this.parameterAnalyzer.analyze(targetFunc);
+      const allIssues = [...placeholderIssues, ...parameterIssues];
+
+      const score = Math.max(0, 10 - allIssues.length * 2);
+      const isComplete = score >= 9;
+
       return {
-        content: [{ type: "text", text: `函数 '${function_name}' 未找到` }],
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                is_complete: isComplete,
+                violations: allIssues.map((i) => ({
+                  rule: i.type,
+                  violated: true,
+                  details: i.message,
+                })),
+                score,
+                threshold: 9.0,
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ error: `Failed to validate implementation: ${error}` }, null, 2),
+          },
+        ],
+        isError: true,
       };
     }
-
-    const placeholderIssues = this.placeholderAnalyzer.analyze(targetFunc);
-    const parameterIssues = this.parameterAnalyzer.analyze(targetFunc);
-    const allIssues = [...placeholderIssues, ...parameterIssues];
-
-    const score = Math.max(0, 10 - allIssues.length * 2);
-    const isComplete = score >= 9;
-
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(
-            {
-              is_complete: isComplete,
-              violations: allIssues.map((i) => ({
-                rule: i.type,
-                violated: true,
-                details: i.message,
-              })),
-              score,
-              threshold: 9.0,
-            },
-            null,
-            2
-          ),
-        },
-      ],
-    };
   }
 
   private async handleCheckErrorHandling(args: { file_path: string }) {
-    const { file_path } = args;
-    const sourceCode = fs.readFileSync(file_path, 'utf-8');
-    const issues = this.errorHandlingAnalyzer.analyze(sourceCode, file_path);
+    try {
+      const { file_path } = args;
+      const sourceCode = fs.readFileSync(file_path, 'utf-8');
+      const issues = this.errorHandlingAnalyzer.analyze(sourceCode, file_path);
 
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify({ error_handling_issues: issues }, null, 2),
-        },
-      ],
-    };
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ error_handling_issues: issues }, null, 2),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ error: `Failed to check error handling: ${error}` }, null, 2),
+          },
+        ],
+        isError: true,
+      };
+    }
   }
 
   private async handleDetectDeadCode(args: { file_path: string }) {
-    const { file_path } = args;
-    const sourceCode = fs.readFileSync(file_path, 'utf-8');
-    const issues = this.deadCodeAnalyzer.analyze(sourceCode, file_path);
+    try {
+      const { file_path } = args;
+      const sourceCode = fs.readFileSync(file_path, 'utf-8');
+      const issues = this.deadCodeAnalyzer.analyze(sourceCode, file_path);
 
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify({ dead_code_issues: issues }, null, 2),
-        },
-      ],
-    };
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ dead_code_issues: issues }, null, 2),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ error: `Failed to detect dead code: ${error}` }, null, 2),
+          },
+        ],
+        isError: true,
+      };
+    }
   }
 
   private async handleCheckDependencies(args: { file_path: string }) {
-    const { file_path } = args;
-    const sourceCode = fs.readFileSync(file_path, 'utf-8');
-    const issues = this.dependencyAnalyzer.analyze(sourceCode, file_path);
+    try {
+      const { file_path } = args;
+      const sourceCode = fs.readFileSync(file_path, 'utf-8');
+      const issues = this.dependencyAnalyzer.analyze(sourceCode, file_path);
 
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify({ dependency_issues: issues }, null, 2),
-        },
-      ],
-    };
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ dependency_issues: issues }, null, 2),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ error: `Failed to check dependencies: ${error}` }, null, 2),
+          },
+        ],
+        isError: true,
+      };
+    }
   }
 
   private findSourceFiles(dir: string): string[] {
