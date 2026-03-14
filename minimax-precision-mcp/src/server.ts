@@ -11,8 +11,9 @@ import { DataFlowAnalyzer } from "./analyzers/dataflow.js";
 import { ErrorHandlingAnalyzer } from "./analyzers/error-handling.js";
 import { DeadCodeAnalyzer } from "./analyzers/dead-code.js";
 import { DependencyAnalyzer } from "./analyzers/dependency.js";
+import { ProjectValidator } from "./analyzers/project-validator.js";
 import { PromptGenerator } from "./prompts/generator.js";
-import { AnalysisReport, ValidateFileResult, ValidationFinding } from "./types.js";
+import { AnalysisReport, ValidateFileResult, ValidateProjectResult, ValidationFinding } from "./types.js";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -26,6 +27,7 @@ export class MinimaxPrecisionServer {
   private deadCodeAnalyzer: DeadCodeAnalyzer;
   private dependencyAnalyzer: DependencyAnalyzer;
   private promptGenerator: PromptGenerator;
+  private projectValidator: ProjectValidator;
 
   constructor() {
     this.server = new Server(
@@ -48,6 +50,7 @@ export class MinimaxPrecisionServer {
     this.deadCodeAnalyzer = new DeadCodeAnalyzer();
     this.dependencyAnalyzer = new DependencyAnalyzer();
     this.promptGenerator = new PromptGenerator();
+    this.projectValidator = new ProjectValidator();
 
     this.setupHandlers();
   }
@@ -150,6 +153,25 @@ export class MinimaxPrecisionServer {
             required: ["file_path"],
           },
         },
+        {
+          name: "validate_project",
+          description:
+            "【架构门控工具】对整个项目目录进行跨模块连线检查。" +
+            "检测：整个子系统从未被入口文件调用（dead modules）、Coordinator 定义但未实例化、" +
+            "trait 方法调用与声明不匹配。返回 passed:true/false。" +
+            "passed:false 时必须修复所有 blockers（将断开的模块接入主执行路径），不允许跳过。" +
+            "在所有文件编辑完成后调用此工具作为最终验证。",
+          inputSchema: {
+            type: "object",
+            properties: {
+              path: {
+                type: "string",
+                description: "项目根目录路径（包含 Cargo.toml / package.json / go.mod 的目录）",
+              },
+            },
+            required: ["path"],
+          },
+        },
       ],
     }));
 
@@ -190,6 +212,10 @@ export class MinimaxPrecisionServer {
         case "validate_file":
           return this.handleValidateFile({
             file_path: this.requireStringArg(args, "file_path"),
+          });
+        case "validate_project":
+          return this.handleValidateProject({
+            path: this.requireStringArg(args, "path"),
           });
         default:
           throw new Error(`Unknown tool: ${name}`);
@@ -489,6 +515,33 @@ export class MinimaxPrecisionServer {
             type: "text",
             text: JSON.stringify(
               { error: `Failed to validate file: ${error}` },
+              null,
+              2
+            ),
+          },
+        ],
+      };
+    }
+  }
+
+  private async handleValidateProject(args: { path: string }) {
+    try {
+      const result: ValidateProjectResult = this.projectValidator.validateProject(args.path);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              { error: `Failed to validate project: ${error}` },
               null,
               2
             ),

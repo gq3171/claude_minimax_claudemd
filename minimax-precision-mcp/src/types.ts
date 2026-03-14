@@ -91,6 +91,46 @@ export interface ValidationFinding {
   suggestion?: string;
 }
 
+/** A single finding from the project-level wiring analysis. */
+export interface ProjectFinding {
+  /** Which check produced this finding */
+  category:
+    | "dead_module"
+    | "missing_entry"
+    | "disconnected_subsystem"
+    | "trait_mismatch"
+    | "unused_import";
+  severity: "critical" | "error" | "warning";
+  /** File or directory path that triggered this finding */
+  location: string;
+  message: string;
+  suggestion?: string;
+}
+
+/**
+ * Return type of the `validate_project` gate tool.
+ * Detects cross-module wiring issues: dead subsystems, missing connections,
+ * coordinators that are implemented but never called from the entry point.
+ * `passed` is false when any blocker (critical/error severity) exists.
+ */
+export interface ValidateProjectResult {
+  passed: boolean;
+  path: string;
+  language: string;
+  entry_point: string | null;
+  modules_found: number;
+  modules_connected: number;
+  modules_dead: number;
+  total_issues: number;
+  /** Issues with severity critical|error — MUST be fixed before proceeding */
+  blockers: ProjectFinding[];
+  /** Issues with severity warning — reported but do not block */
+  warnings: ProjectFinding[];
+  /** Names of modules/directories that appear disconnected from the entry point */
+  dead_modules: string[];
+  verdict: string;
+}
+
 /**
  * Return type of the `validate_file` gate tool.
  * `passed` is false when any blocker (critical/error severity) exists.

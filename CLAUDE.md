@@ -47,6 +47,24 @@ validate_file(file_path: "<modified file>")
 
 **This step is NOT optional.** "I think it's fine" / "the build passes" are NOT substitutes for `validate_file` returning `passed: true`.
 
+### Step 1d - Project Architecture Check (MANDATORY after all files done)
+
+**After all source files are written/edited**, call the `validate_project` MCP tool on the project root:
+
+```
+validate_project(path: "<project root dir>")
+```
+
+**Rules:**
+- If `passed: false` → you are **BLOCKED**. Fix every item in `blockers[]`:
+  - `dead_module`: Wire the module into the main execution path (add `mod xxx;` and instantiate/call its types from the entry file)
+  - `disconnected_subsystem`: Instantiate the Coordinator/Manager/Handler and call its methods from main
+  - `trait_mismatch`: Add the missing method to the trait definition, then implement it in all impls
+- Re-call `validate_project` after every fix. Repeat until `passed: true`.
+- Do NOT proceed to Step 2 while `validate_project` returns `passed: false`.
+
+**This step is NOT optional.** Unit tests passing for individual components does NOT mean the system works — validate_project must confirm all subsystems are connected.
+
 ### Step 2 - Build & Lint & Test by language:
 
 #### Rust
