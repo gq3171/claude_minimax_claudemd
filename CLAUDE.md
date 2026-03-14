@@ -31,6 +31,16 @@ find src/ -name "*.rs" -o -name "*.ts" -o -name "*.go" -o -name "*.java" | xargs
 - If any file has 0-3 lines (excluding blank lines and single-line comments): that file is a placeholder. Implement it or delete it.
 - A file containing only comments, module declarations, or `use` statements is NOT implemented.
 
+### Step 1c - MCP Code Quality Check (if minimax-precision-mcp is available)
+If the minimax-precision-mcp MCP server is configured, run these checks on modified code files:
+```
+Use check_error_handling tool to detect error handling anti-patterns (.unwrap_or_default, .unwrap_or(""))
+Use detect_dead_code tool to find public functions that are never called
+Use check_dependencies tool to find functions called but not defined
+```
+- Fix all issues found before proceeding to Step 2
+- These checks help catch common problems that bypass grep stub detection
+
 ### Step 2 - Build & Lint & Test by language:
 
 #### Rust
