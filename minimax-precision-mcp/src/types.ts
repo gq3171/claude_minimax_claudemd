@@ -73,3 +73,46 @@ export interface GeneratedPrompt {
   checkpoints: string[];
   antiPatterns: string[];
 }
+
+/** A single normalized finding from any of the analyzers, used in ValidateFileResult. */
+export interface ValidationFinding {
+  /** Which analyzer produced this finding */
+  category:
+    | "placeholder"
+    | "unused_parameter"
+    | "error_handling"
+    | "dead_code"
+    | "missing_dependency"
+    | "data_flow";
+  severity: "critical" | "error" | "warning";
+  /** File:line reference */
+  location: string;
+  message: string;
+  suggestion?: string;
+}
+
+/**
+ * Return type of the `validate_file` gate tool.
+ * `passed` is false when any blocker (critical/error severity) exists.
+ */
+export interface ValidateFileResult {
+  passed: boolean;
+  file: string;
+  language: string;
+  functions_checked: number;
+  total_issues: number;
+  /** Issues with severity critical|error — MUST be fixed before proceeding */
+  blockers: ValidationFinding[];
+  /** Issues with severity warning — reported but do not block */
+  warnings: ValidationFinding[];
+  by_category: {
+    placeholders: number;
+    unused_parameters: number;
+    error_handling: number;
+    dead_code: number;
+    missing_dependencies: number;
+    data_flow: number;
+  };
+  /** One-line human-readable verdict */
+  verdict: string;
+}

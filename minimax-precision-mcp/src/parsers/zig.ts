@@ -67,11 +67,12 @@ export class ZigParser {
   }
 
   private extractBody(lines: string[], startLine: number): string {
+    const MAX_LINES = 2000;
     let braceCount = 0;
     let body = "";
     let started = false;
 
-    for (let i = startLine; i < lines.length; i++) {
+    for (let i = startLine; i < lines.length && i < startLine + MAX_LINES; i++) {
       const line = lines[i];
 
       for (const char of line) {

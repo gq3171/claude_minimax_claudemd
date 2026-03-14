@@ -4,7 +4,12 @@ import * as fs from "fs";
 export class DataFlowAnalyzer {
   analyzeFile(filePath: string, functions: FunctionIR[]): Issue[] {
     const issues: Issue[] = [];
-    const sourceCode = fs.readFileSync(filePath, "utf-8");
+    let sourceCode: string;
+    try {
+      sourceCode = fs.readFileSync(filePath, "utf-8");
+    } catch (err) {
+      throw new Error(`Cannot read file '${filePath}': ${err}`);
+    }
 
     for (const func of functions) {
       const constructedObjects = this.findConstructedObjects(func, sourceCode);
@@ -98,6 +103,6 @@ export class DataFlowAnalyzer {
       }
     }
 
-    return usageCount > 1;
+    return usageCount > 0;
   }
 }

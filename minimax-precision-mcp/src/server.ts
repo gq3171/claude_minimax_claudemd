@@ -12,7 +12,7 @@ import { ErrorHandlingAnalyzer } from "./analyzers/error-handling.js";
 import { DeadCodeAnalyzer } from "./analyzers/dead-code.js";
 import { DependencyAnalyzer } from "./analyzers/dependency.js";
 import { PromptGenerator } from "./prompts/generator.js";
-import { AnalysisReport } from "./types.js";
+import { AnalysisReport, ValidateFileResult, ValidationFinding } from "./types.js";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -134,6 +134,22 @@ export class MinimaxPrecisionServer {
             required: ["file_path"],
           },
         },
+        {
+          name: "validate_file",
+          description:
+            "【门控工具】对单个文件运行全部质量检查（placeholder、参数、错误处理、死代码、依赖、数据流）。" +
+            "返回 passed:true/false。passed:false 时必须修复所有 blockers 再继续，不允许跳过。",
+          inputSchema: {
+            type: "object",
+            properties: {
+              file_path: {
+                type: "string",
+                description: "要验证的源代码文件路径",
+              },
+            },
+            required: ["file_path"],
+          },
+        },
       ],
     }));
 
@@ -142,23 +158,57 @@ export class MinimaxPrecisionServer {
 
       switch (name) {
         case "analyze_function":
-          return this.handleAnalyzeFunction(args as any);
+          return this.handleAnalyzeFunction({
+            file_path: this.requireStringArg(args, "file_path"),
+            function_name: this.requireStringArg(args, "function_name"),
+          });
         case "scan_placeholders":
-          return this.handleScanPlaceholders(args as any);
+          return this.handleScanPlaceholders({
+            path: this.requireStringArg(args, "path"),
+          });
         case "trace_data_flow":
-          return this.handleTraceDataFlow(args as any);
+          return this.handleTraceDataFlow({
+            file_path: this.requireStringArg(args, "file_path"),
+          });
         case "validate_implementation":
-          return this.handleValidateImplementation(args as any);
+          return this.handleValidateImplementation({
+            file_path: this.requireStringArg(args, "file_path"),
+            function_name: this.requireStringArg(args, "function_name"),
+          });
         case "check_error_handling":
-          return this.handleCheckErrorHandling(args as any);
+          return this.handleCheckErrorHandling({
+            file_path: this.requireStringArg(args, "file_path"),
+          });
         case "detect_dead_code":
-          return this.handleDetectDeadCode(args as any);
+          return this.handleDetectDeadCode({
+            file_path: this.requireStringArg(args, "file_path"),
+          });
         case "check_dependencies":
-          return this.handleCheckDependencies(args as any);
+          return this.handleCheckDependencies({
+            file_path: this.requireStringArg(args, "file_path"),
+          });
+        case "validate_file":
+          return this.handleValidateFile({
+            file_path: this.requireStringArg(args, "file_path"),
+          });
         default:
           throw new Error(`Unknown tool: ${name}`);
       }
     });
+  }
+
+  /** Extract a required non-empty string argument, throwing on missing/wrong type. */
+  private requireStringArg(
+    args: Record<string, unknown> | undefined,
+    key: string
+  ): string {
+    const val = args?.[key];
+    if (typeof val !== "string" || val.length === 0) {
+      throw new Error(
+        `Tool argument '${key}' must be a non-empty string, got: ${JSON.stringify(val)}`
+      );
+    }
+    return val;
   }
 
   private async handleAnalyzeFunction(args: { file_path: string; function_name: string }) {
@@ -420,14 +470,194 @@ export class MinimaxPrecisionServer {
     }
   }
 
-  private findSourceFiles(dir: string): string[] {
-    const files: string[] = [];
-    const entries = fs.readdirSync(dir, { withFileTypes: true });
+  private async handleValidateFile(args: { file_path: string }) {
+    try {
+      const { file_path } = args;
+      const result = this.runValidateFile(file_path);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              { error: `Failed to validate file: ${error}` },
+              null,
+              2
+            ),
+          },
+        ],
+      };
+    }
+  }
 
+  /**
+   * Core gate logic: runs every analyzer on the file, aggregates findings, and
+   * returns a unified ValidateFileResult.  passed === false means the model MUST
+   * fix all blockers before proceeding — this is the primary enforcement point.
+   */
+  private runValidateFile(filePath: string): ValidateFileResult {
+    const language = this.languageDetector.detectLanguage(filePath) ?? "unknown";
+    const findings: ValidationFinding[] = [];
+
+    // ── 1. Parse file into function IR ────────────────────────────────────────
+    let functions: ReturnType<typeof this.languageDetector.parseFile>;
+    try {
+      functions = this.languageDetector.parseFile(filePath);
+    } catch (err) {
+      throw new Error(`Cannot parse '${filePath}': ${err}`);
+    }
+
+    // ── 2. Per-function checks (placeholder + unused parameters) ──────────────
+    for (const func of functions) {
+      // Placeholder / empty body
+      const placeholderIssues = this.placeholderAnalyzer.analyze(func);
+      for (const issue of placeholderIssues) {
+        findings.push({
+          category: issue.type === "empty_function" ? "placeholder" : "placeholder",
+          severity: issue.severity,
+          location: `${issue.location.file}:${issue.location.line}`,
+          message: issue.message,
+        });
+      }
+
+      // Unused parameters (may throw if file unreadable — caught by outer try)
+      try {
+        const paramIssues = this.parameterAnalyzer.analyze(func);
+        for (const issue of paramIssues) {
+          findings.push({
+            category: "unused_parameter",
+            severity: issue.severity,
+            location: `${issue.location.file}:${issue.location.line}`,
+            message: issue.message,
+          });
+        }
+      } catch {
+        // Parameter analysis is best-effort; skip if unsupported language/error
+      }
+    }
+
+    // ── 3. File-level checks ──────────────────────────────────────────────────
+    let sourceCode: string;
+    try {
+      sourceCode = fs.readFileSync(filePath, "utf-8");
+    } catch (err) {
+      throw new Error(`Cannot read '${filePath}': ${err}`);
+    }
+
+    // Error handling antipatterns
+    const errorIssues = this.errorHandlingAnalyzer.analyze(sourceCode, filePath);
+    for (const issue of errorIssues) {
+      findings.push({
+        category: "error_handling",
+        severity: issue.severity,
+        location: `${issue.location.file}:${issue.location.line}`,
+        message: issue.message,
+        suggestion: issue.suggestion,
+      });
+    }
+
+    // Dead code (public functions never called)
+    const deadIssues = this.deadCodeAnalyzer.analyze(sourceCode, filePath);
+    for (const issue of deadIssues) {
+      findings.push({
+        category: "dead_code",
+        severity: issue.severity,
+        location: `${issue.location.file}:${issue.location.line}`,
+        message: issue.message,
+        suggestion: issue.suggestion,
+      });
+    }
+
+    // Missing dependencies
+    const depIssues = this.dependencyAnalyzer.analyze(sourceCode, filePath);
+    for (const issue of depIssues) {
+      findings.push({
+        category: "missing_dependency",
+        severity: issue.severity,
+        location: `${issue.location.file}:${issue.location.line}`,
+        message: issue.message,
+        suggestion: issue.suggestion,
+      });
+    }
+
+    // Data flow: constructed-but-unused objects
+    if (functions.length > 0) {
+      try {
+        const dataFlowIssues = this.dataFlowAnalyzer.analyzeFile(filePath, functions);
+        for (const issue of dataFlowIssues) {
+          findings.push({
+            category: "data_flow",
+            severity: issue.severity,
+            location: `${issue.location.file}:${issue.location.line}`,
+            message: issue.message,
+          });
+        }
+      } catch {
+        // Data flow is best-effort
+      }
+    }
+
+    // ── 4. Aggregate ─────────────────────────────────────────────────────────
+    const blockers = findings.filter(
+      (f) => f.severity === "critical" || f.severity === "error"
+    );
+    const warnings = findings.filter((f) => f.severity === "warning");
+
+    const byCategory = {
+      placeholders: findings.filter((f) => f.category === "placeholder").length,
+      unused_parameters: findings.filter((f) => f.category === "unused_parameter").length,
+      error_handling: findings.filter((f) => f.category === "error_handling").length,
+      dead_code: findings.filter((f) => f.category === "dead_code").length,
+      missing_dependencies: findings.filter((f) => f.category === "missing_dependency").length,
+      data_flow: findings.filter((f) => f.category === "data_flow").length,
+    };
+
+    const passed = blockers.length === 0;
+    const verdict = passed
+      ? `✅ PASSED — ${filePath} (${functions.length} functions, ${warnings.length} warnings)`
+      : `❌ BLOCKED — ${filePath}: ${blockers.length} blocker(s) must be fixed before proceeding`;
+
+    return {
+      passed,
+      file: filePath,
+      language,
+      functions_checked: functions.length,
+      total_issues: findings.length,
+      blockers,
+      warnings,
+      by_category: byCategory,
+      verdict,
+    };
+  }
+
+  private findSourceFiles(dir: string, depth: number = 0): string[] {
+    const MAX_DEPTH = 20;
+    if (depth > MAX_DEPTH) return [];
+
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch (err) {
+      throw new Error(`Cannot read directory '${dir}': ${err}`);
+    }
+
+    const files: string[] = [];
     for (const entry of entries) {
       const fullPath = path.join(dir, entry.name);
       if (entry.isDirectory()) {
-        files.push(...this.findSourceFiles(fullPath));
+        try {
+          files.push(...this.findSourceFiles(fullPath, depth + 1));
+        } catch {
+          // Skip unreadable subdirectories without aborting the whole scan
+        }
       } else if (entry.isFile()) {
         const lang = this.languageDetector.detectLanguage(fullPath);
         if (lang) files.push(fullPath);

@@ -31,15 +31,21 @@ find src/ -name "*.rs" -o -name "*.ts" -o -name "*.go" -o -name "*.java" | xargs
 - If any file has 0-3 lines (excluding blank lines and single-line comments): that file is a placeholder. Implement it or delete it.
 - A file containing only comments, module declarations, or `use` statements is NOT implemented.
 
-### Step 1c - MCP Code Quality Check (if minimax-precision-mcp is available)
-If the minimax-precision-mcp MCP server is configured, run these checks on modified code files:
+### Step 1c - MCP Gate Check (MANDATORY, non-skippable)
+
+**After writing or editing ANY source file**, call the `validate_file` MCP tool on that file:
+
 ```
-Use check_error_handling tool to detect error handling anti-patterns (.unwrap_or_default, .unwrap_or(""))
-Use detect_dead_code tool to find public functions that are never called
-Use check_dependencies tool to find functions called but not defined
+validate_file(file_path: "<modified file>")
 ```
-- Fix all issues found before proceeding to Step 2
-- These checks help catch common problems that bypass grep stub detection
+
+**Rules:**
+- If `passed: false` → you are **BLOCKED**. Fix every item in `blockers[]`. Then re-call `validate_file`. Repeat until `passed: true`.
+- If `passed: true` → proceed. Warnings in `warnings[]` are informational; fix them if feasible.
+- Do NOT proceed to Step 2 while any file has `passed: false`.
+- After all file edits are done, call `scan_placeholders(path: "src/")` once. If any placeholders are found, fix them and re-run `validate_file` on the affected files.
+
+**This step is NOT optional.** "I think it's fine" / "the build passes" are NOT substitutes for `validate_file` returning `passed: true`.
 
 ### Step 2 - Build & Lint & Test by language:
 

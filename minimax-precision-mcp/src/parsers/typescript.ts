@@ -23,6 +23,31 @@ export class TypeScriptParser {
     if (node.type === "function_declaration" || node.type === "method_definition") {
       const func = this.parseFunctionNode(node, filePath, sourceCode);
       if (func) functions.push(func);
+    } else if (
+      node.type === "lexical_declaration" ||
+      node.type === "variable_declaration"
+    ) {
+      // Handle: const foo = (x) => { ... } / const foo = function(...) { ... }
+      for (const child of node.children) {
+        if (child.type === "variable_declarator") {
+          const nameNode = child.childForFieldName("name");
+          const valueNode = child.childForFieldName("value");
+          if (
+            nameNode &&
+            valueNode &&
+            (valueNode.type === "arrow_function" ||
+              valueNode.type === "function_expression")
+          ) {
+            const func = this.parseArrowFunctionNode(
+              valueNode,
+              nameNode,
+              filePath,
+              sourceCode
+            );
+            if (func) functions.push(func);
+          }
+        }
+      }
     }
 
     for (const child of node.children) {
@@ -30,6 +55,33 @@ export class TypeScriptParser {
     }
 
     return functions;
+  }
+
+  private parseArrowFunctionNode(
+    node: Parser.SyntaxNode,
+    nameNode: Parser.SyntaxNode,
+    filePath: string,
+    sourceCode: string
+  ): FunctionIR | null {
+    const name = sourceCode.substring(nameNode.startIndex, nameNode.endIndex);
+    const parameters = this.extractParameters(node, sourceCode);
+    const returnType = this.extractReturnType(node, sourceCode);
+    const body = node.childForFieldName("body");
+
+    return {
+      name,
+      filePath,
+      lineNumber: node.startPosition.row + 1,
+      signature: { parameters, returnType },
+      body: {
+        isEmpty: this.isBodyEmpty(body),
+        hasPlaceholder: this.hasPlaceholder(body, sourceCode),
+      },
+      metadata: {
+        language: "typescript",
+        isAsync: this.isAsync(node),
+      },
+    };
   }
 
   private parseFunctionNode(node: Parser.SyntaxNode, filePath: string, sourceCode: string): FunctionIR | null {
@@ -102,7 +154,11 @@ export class TypeScriptParser {
   private hasPlaceholder(bodyNode: Parser.SyntaxNode | null, sourceCode: string): boolean {
     if (!bodyNode) return false;
     const bodyText = sourceCode.substring(bodyNode.startIndex, bodyNode.endIndex);
-    return /throw new Error\("not implemented"\)|throw new Error\("TODO"\)/.test(bodyText);
+    // Match single/double/template-quoted "not implemented" / "TODO" throw statements
+    // and comment-based placeholders
+    return /throw\s+new\s+Error\s*\(\s*["'`](?:not implemented|TODO)["'`]\s*\)/.test(
+      bodyText
+    );
   }
 
   private isAsync(node: Parser.SyntaxNode): boolean {
