@@ -209,7 +209,6 @@ export class MinimaxPrecisionServer {
             text: JSON.stringify({ error: `Failed to analyze function: ${error}` }, null, 2),
           },
         ],
-        isError: true,
       };
     }
   }
@@ -261,7 +260,6 @@ export class MinimaxPrecisionServer {
             text: JSON.stringify({ error: `Failed to scan placeholders: ${error}` }, null, 2),
           },
         ],
-        isError: true,
       };
     }
   }
@@ -288,7 +286,6 @@ export class MinimaxPrecisionServer {
             text: JSON.stringify({ error: `Failed to trace data flow: ${error}` }, null, 2),
           },
         ],
-        isError: true,
       };
     }
   }
@@ -341,7 +338,6 @@ export class MinimaxPrecisionServer {
             text: JSON.stringify({ error: `Failed to validate implementation: ${error}` }, null, 2),
           },
         ],
-        isError: true,
       };
     }
   }
@@ -368,7 +364,6 @@ export class MinimaxPrecisionServer {
             text: JSON.stringify({ error: `Failed to check error handling: ${error}` }, null, 2),
           },
         ],
-        isError: true,
       };
     }
   }
@@ -395,7 +390,6 @@ export class MinimaxPrecisionServer {
             text: JSON.stringify({ error: `Failed to detect dead code: ${error}` }, null, 2),
           },
         ],
-        isError: true,
       };
     }
   }
@@ -422,7 +416,6 @@ export class MinimaxPrecisionServer {
             text: JSON.stringify({ error: `Failed to check dependencies: ${error}` }, null, 2),
           },
         ],
-        isError: true,
       };
     }
   }
