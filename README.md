@@ -222,12 +222,28 @@ AI 生成/修改代码
 
 ---
 
+### 已知限制：模型遵从性
+
+hooks 的实际效果取决于模型的指令遵从性。
+
+**PostToolUse hook（逐文件检查）**：hook 的输出会通过 stderr 投回模型，但部分模型（尤其是 MiniMax 系列）处于"生成模式"时会忽略中间报错，继续写完所有文件后才处理。
+
+**Stop hook（最终门控）**：这是真正可靠的拦截点。无论模型在生成过程中做了什么，Stop hook 都会在模型宣布"完成"之前执行全量检查，发现 blocker 则强制阻止停止并要求修复。
+
+**实际观测行为：**
+- MiniMax 等模型：生成过程中忽略 PostToolUse 报错 → 写完全部文件 → Stop hook 触发 → 集中修复
+- Sonnet/Opus 等模型：遇到 PostToolUse 报错会停下来逐文件修复，更接近"即时检查"的预期效果
+
+约束层面我们已经做到了极限——hooks exit code 正确、输出格式醒目、CLAUDE.md 规则明确。剩下的差距只能等模型本身的指令遵从性提升。
+
+---
+
 ### 开发
 
 ```bash
 cd minimax-precision-mcp
 npm run build   # 编译 TypeScript
-npm test        # vitest（49 个测试）
+npm test        # vitest（56 个测试）
 npm run lint    # eslint --max-warnings 0
 ```
 
@@ -446,12 +462,28 @@ AI writes/edits code
 
 ---
 
+### Known Limitations: Model Compliance
+
+The effectiveness of the hooks depends on how well the model follows instructions.
+
+**PostToolUse hook (per-file check):** The hook output is injected back into the model via stderr, but some models — MiniMax in particular — are in "generation mode" and ignore mid-stream errors. They write all planned files first, then address issues in a batch.
+
+**Stop hook (final gate):** This is the reliably enforced checkpoint. Regardless of what the model did during generation, the Stop hook runs a full validation pass before the model can declare completion. Blockers here cannot be ignored.
+
+**Observed behavior in practice:**
+- MiniMax and similar models: ignore PostToolUse errors mid-generation → write all files → Stop hook fires → batch fix
+- Sonnet/Opus and similar models: stop at PostToolUse errors and fix file-by-file, closer to the intended "immediate feedback" behavior
+
+We have done everything possible on the constraints side — correct exit codes, prominent output format, explicit CLAUDE.md rules. The remaining gap comes down to model instruction-following quality, which will improve as models evolve.
+
+---
+
 ### Development
 
 ```bash
 cd minimax-precision-mcp
 npm run build   # compile TypeScript
-npm test        # vitest (49 tests)
+npm test        # vitest (56 tests)
 npm run lint    # eslint --max-warnings 0
 ```
 
