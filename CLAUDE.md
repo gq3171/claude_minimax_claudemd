@@ -1,5 +1,27 @@
 # Global Claude Code Rules
 
+## CONFIGURATION VALUE PROTECTION
+
+**NEVER silently modify any of the following without first asking the user to confirm:**
+
+- Language/runtime version specifiers: Rust `edition`, Python `python_requires`, Java `sourceCompatibility`, Go `go` directive in go.mod
+- Dependency versions in any manifest: `Cargo.toml`, `package.json`, `go.mod`, `pom.xml`, `build.gradle`, `requirements.txt`, `pyproject.toml`
+- Compiler/toolchain flags: `RUSTFLAGS`, `CFLAGS`, `--target`, `--features`
+- Registry or mirror settings
+- Any field whose wrong value could silently change runtime behavior or break downstream consumers
+
+**If a value looks unfamiliar or potentially wrong:**
+1. Run the relevant version command first: `rustc --version`, `node --version`, `go version`, etc.
+2. State what you observed and WHY you think it might need changing
+3. Ask: "Current value is X. Should I change it to Y?" — wait for explicit approval
+4. NEVER assume a value is invalid just because it is newer than your training data
+
+**Example of forbidden behavior:**
+> Seeing `edition = "2024"` → silently changing it to `edition = "2021"` because "2024 is invalid"
+> WRONG: Rust 2024 edition is stable since Rust 1.85 (Feb 2025). Always verify before changing.
+
+---
+
 ## IDENTITY OF TASK COMPLETION
 A task is ONLY complete when ALL of the following are true:
 - grep finds zero stub markers (see Verification step)
