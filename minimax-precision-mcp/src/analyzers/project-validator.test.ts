@@ -297,6 +297,50 @@ fn test_something_trivial() {
     expect(integrationWarning).toBeDefined();
   });
 
+  it("warns when a service object is created in main.rs but never passed to subsystems", () => {
+    const projDir = makeDir("rust_uninjected_service");
+    writeFile(path.join(projDir, "Cargo.toml"), '[package]\nname="test"\nversion="0.1.0"\nedition="2021"\n');
+    writeFile(path.join(projDir, "src", "main.rs"), `
+mod storage;
+mod workflow;
+use storage::Storage;
+use workflow::WorkflowEngine;
+fn main() {
+    let storage = Storage::new("./data");
+    let _stories = storage.list_stories();
+    let engine = WorkflowEngine::new();
+    engine.run();
+}
+`);
+    writeFile(path.join(projDir, "src", "storage.rs"), `
+pub struct Storage { pub path: String }
+impl Storage {
+    pub fn new(path: &str) -> Self { Self { path: path.to_string() } }
+    pub fn list_stories(&self) -> Vec<String> { vec![] }
+}
+#[cfg(test)]
+mod tests { use super::*; #[test] fn test_new() { let s = Storage::new("x"); assert_eq!(s.path, "x"); } }
+`);
+    writeFile(path.join(projDir, "src", "workflow.rs"), `
+pub struct WorkflowEngine;
+impl WorkflowEngine {
+    pub fn new() -> Self { Self }
+    pub fn run(&self) {}
+}
+#[cfg(test)]
+mod tests { use super::*; #[test] fn test_run() { let e = WorkflowEngine::new(); e.run(); } }
+`);
+
+    const result = validator.validateProject(projDir);
+    const uninjectedWarning = result.warnings.find(w =>
+      w.category === "disconnected_subsystem" &&
+      w.message.includes("storage") &&
+      w.message.includes("Storage")
+    );
+    expect(uninjectedWarning).toBeDefined();
+    expect(uninjectedWarning?.severity).toBe("warning");
+  });
+
   it("warns when a TypeScript file is not imported in index.ts", () => {
     const projDir = makeDir("ts_dead");
     writeFile(path.join(projDir, "package.json"), '{"name":"test"}');

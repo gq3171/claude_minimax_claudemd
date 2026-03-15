@@ -200,6 +200,10 @@ export class ProjectValidator {
     const integrationFindings = this.checkRustIntegrationTestCoverage(srcDir, projectPath);
     findings.push(...integrationFindings);
 
+    // Service objects created in main.rs but never injected into subsystems
+    const uninjectedFindings = this.checkRustUninjectedServices(entryPath, entryContent);
+    findings.push(...uninjectedFindings);
+
     return this.buildResult(
       projectPath,
       "rust",
@@ -521,6 +525,61 @@ export class ProjectValidator {
     }
 
     return [];
+  }
+
+  /**
+   * Detects service objects (Storage, Repository, Cache, etc.) created in main.rs
+   * via ::new() that are never passed as function/constructor arguments to other modules.
+   *
+   * Example of the anti-pattern:
+   *   let storage = Storage::new("./data")?;
+   *   storage.list_stories()?;   // local use only
+   *   tui::run()?;               // storage never passed here → silently disconnected
+   */
+  private checkRustUninjectedServices(
+    entryPath: string,
+    entryContent: string
+  ): ProjectFinding[] {
+    const findings: ProjectFinding[] = [];
+
+    // Only applies to main.rs — lib.rs legitimately re-exports without instantiating
+    if (!entryPath.endsWith('main.rs')) return findings;
+
+    const lines = entryContent.split('\n');
+
+    // Service-like type names: stateful objects that carry data and should be injected
+    const serviceTypePattern =
+      /^(?:\w*(?:Storage|Repository|Store|Cache|Database|Pool|Registry|Persistence)\w*)$/;
+    const letNewRegex = /^\s*let\s+(?:mut\s+)?(\w+)\s*=\s*(\w+)::new\s*\(/;
+
+    for (let i = 0; i < lines.length; i++) {
+      const match = lines[i].match(letNewRegex);
+      if (!match) continue;
+
+      const varName = match[1];
+      const typeName = match[2];
+
+      if (!serviceTypePattern.test(typeName)) continue;
+
+      // Check if varName ever appears inside a function call's argument list
+      // Pattern: (varName  or  , varName  (optionally with & / &mut prefix)
+      const restOfFile = lines.slice(i + 1).join('\n');
+      const passedAsArg = new RegExp(
+        `[\\(,]\\s*(?:&(?:mut\\s+)?)?\\b${varName}\\b`
+      ).test(restOfFile);
+
+      if (!passedAsArg) {
+        findings.push({
+          category: 'disconnected_subsystem',
+          severity: 'warning',
+          location: entryPath,
+          message: `'${varName}' (${typeName}) is created in main.rs but never passed to any subsystem — its data is never consumed by the workflow`,
+          suggestion: `Pass '${varName}' to the subsystem that needs it (e.g. WorkflowEngine::new(${varName}) or App::new(${varName})) so the data flows through the system`,
+        });
+      }
+    }
+
+    return findings;
   }
 
   /** Recursively collect all .rs files under a directory (depth-limited) */

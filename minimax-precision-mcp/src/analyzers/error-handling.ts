@@ -61,6 +61,13 @@ export class ErrorHandlingAnalyzer {
         }
       });
 
+      // ── Weak test assertions (within test blocks) ──────────────────────────
+      // assert!(x.is_ok()) alone proves nothing — it only confirms the type is Result.
+      // A real test must assert on the CONTENT (assert_eq!, assert_ne!, etc.)
+      if (testBlockStartLine !== -1) {
+        this.checkWeakTestAssertions(lines, filePath, testBlockStartLine, issues);
+      }
+
       lines.forEach((line, index) => {
         const lineNumber = index + 1;
         // 跳过测试代码
@@ -215,5 +222,93 @@ export class ErrorHandlingAnalyzer {
     });
 
     return issues;
+  }
+
+  /**
+   * Scans test functions in the test block for the "existence-only assertion" anti-pattern:
+   * assert!(x.is_ok()) or assert!(x.is_some()) appearing without any assert_eq!/assert_ne!
+   * in the same test function body.
+   *
+   * This proves the Result type is correct but says nothing about the actual value returned.
+   */
+  private checkWeakTestAssertions(
+    lines: string[],
+    filePath: string,
+    testBlockStart: number,
+    issues: AnalysisIssue[]
+  ): void {
+    let inTestFn = false;
+    let testFnStartLine = -1;
+    let braceDepth = 0;
+    let testFnLines: Array<{ text: string; num: number }> = [];
+    let pendingTestAttr = false;
+
+    for (let i = testBlockStart; i < lines.length; i++) {
+      const line = lines[i];
+      const trimmed = line.trim();
+
+      // Detect #[test] / #[tokio::test] / #[async_std::test]
+      if (/^#\[(?:\w+::)?test\]/.test(trimmed)) {
+        pendingTestAttr = true;
+        continue;
+      }
+
+      // Start of a test function body
+      if (pendingTestAttr && /^\s*(?:pub\s+)?(?:async\s+)?fn\s+\w+/.test(line)) {
+        inTestFn = true;
+        testFnStartLine = i + 1;
+        testFnLines = [{ text: line, num: i + 1 }];
+        braceDepth =
+          (line.match(/\{/g) ?? []).length - (line.match(/\}/g) ?? []).length;
+        pendingTestAttr = false;
+        continue;
+      }
+
+      // Reset if #[test] was followed by something that's not a fn
+      if (pendingTestAttr && trimmed !== '' && !trimmed.startsWith('#') && !trimmed.startsWith('//')) {
+        pendingTestAttr = false;
+      }
+
+      if (inTestFn) {
+        testFnLines.push({ text: line, num: i + 1 });
+        braceDepth += (line.match(/\{/g) ?? []).length;
+        braceDepth -= (line.match(/\}/g) ?? []).length;
+
+        if (braceDepth <= 0) {
+          // Function body complete — check assertion quality
+          const body = testFnLines.map(l => l.text).join('\n');
+
+          const hasExistenceAssert =
+            /assert!\s*\(\s*[\w.]+\.is_ok\(\)\s*\)/.test(body) ||
+            /assert!\s*\(\s*[\w.]+\.is_some\(\)\s*\)/.test(body);
+
+          const hasValueAssert =
+            body.includes('assert_eq!') ||
+            body.includes('assert_ne!') ||
+            /assert!\s*\([^)]*\.contains\(/.test(body) ||
+            /assert!\s*\([^)]*\.starts_with\(/.test(body);
+
+          if (hasExistenceAssert && !hasValueAssert) {
+            const assertLine = testFnLines.find(l =>
+              /assert!\s*\(\s*[\w.]+\.is_ok\(\)\s*\)/.test(l.text) ||
+              /assert!\s*\(\s*[\w.]+\.is_some\(\)\s*\)/.test(l.text)
+            );
+            issues.push({
+              type: 'error_handling',
+              message:
+                'Test only asserts assert!(x.is_ok()) or assert!(x.is_some()) without checking the actual value — proves the type is correct but not the content',
+              location: { file: filePath, line: assertLine?.num ?? testFnStartLine },
+              severity: 'warning',
+              suggestion:
+                'Unwrap the result and assert specific field values: assert_eq!(result.unwrap().field, expected_value)',
+            });
+          }
+
+          inTestFn = false;
+          testFnLines = [];
+          braceDepth = 0;
+        }
+      }
+    }
   }
 }

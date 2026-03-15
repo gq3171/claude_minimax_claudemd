@@ -210,4 +210,65 @@ describe('ErrorHandlingAnalyzer', () => {
     const fakeDataIssues = issues.filter(i => i.message.includes('JSON object'));
     expect(fakeDataIssues.length).toBe(1);
   });
+
+  it('warns when test only checks assert!(result.is_ok()) without value assertions', () => {
+    const code = [
+      'fn generate_concept(s: &str) -> Result<String, ()> { Ok(s.to_string()) }',
+      '#[cfg(test)]',
+      'mod tests {',
+      '    use super::*;',
+      '    #[test]',
+      '    fn test_generate() {',
+      '        let result = generate_concept("test");',
+      '        assert!(result.is_ok());',
+      '    }',
+      '}',
+    ].join('\n');
+    const issues = analyzer.analyze(code, 'src/agents.rs');
+    const weakAsserts = issues.filter(i =>
+      i.message.includes('assert!(x.is_ok())')
+    );
+    expect(weakAsserts.length).toBe(1);
+    expect(weakAsserts[0].severity).toBe('warning');
+  });
+
+  it('does not warn when test checks is_ok() and also has assert_eq!', () => {
+    const code = [
+      'fn generate_concept(s: &str) -> Result<String, ()> { Ok(s.to_string()) }',
+      '#[cfg(test)]',
+      'mod tests {',
+      '    use super::*;',
+      '    #[test]',
+      '    fn test_generate() {',
+      '        let result = generate_concept("test");',
+      '        assert!(result.is_ok());',
+      '        assert_eq!(result.unwrap(), "test");',
+      '    }',
+      '}',
+    ].join('\n');
+    const issues = analyzer.analyze(code, 'src/agents.rs');
+    const weakAsserts = issues.filter(i =>
+      i.message.includes('assert!(x.is_ok())')
+    );
+    expect(weakAsserts.length).toBe(0);
+  });
+
+  it('warns when test only checks assert!(result.is_some()) without value assertions', () => {
+    const code = [
+      '#[cfg(test)]',
+      'mod tests {',
+      '    #[test]',
+      '    fn test_find() {',
+      '        let result = find_item(42);',
+      '        assert!(result.is_some());',
+      '    }',
+      '}',
+    ].join('\n');
+    const issues = analyzer.analyze(code, 'src/lib.rs');
+    const weakAsserts = issues.filter(i =>
+      i.message.includes('assert!(x.is_ok())') || i.message.includes('assert!(x.is_some())')
+    );
+    expect(weakAsserts.length).toBe(1);
+    expect(weakAsserts[0].severity).toBe('warning');
+  });
 });
