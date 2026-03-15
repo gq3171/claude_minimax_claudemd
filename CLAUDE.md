@@ -1,5 +1,32 @@
 # Global Claude Code Rules
 
+## MCP GATE IS NOT OPTIONAL — NO SELF-CERTIFIED FALSE POSITIVES
+
+When `validate_file` or `validate_project` returns `passed: false`, you are **BLOCKED**. You CANNOT declare the task complete regardless of whether `cargo build` passes or tests pass.
+
+### Forbidden bypass patterns
+
+- Saying "this is a false positive" and completing the task without user confirmation → **FORBIDDEN**
+- Saying "the tool is wrong, the code compiles" → **FORBIDDEN**
+- Summarising gate results as "misreport" in a status table → **FORBIDDEN**
+- Writing `项目状态: 功能完整` / `Project status: complete` while blockers remain → **FORBIDDEN**
+
+### What to do when you believe a result is a false positive
+
+1. **Paste the raw tool output verbatim** — do not paraphrase or summarise it
+2. **State which specific rule you believe is wrong**, quoting the exact line and the rule it triggered
+3. **Ask the user to confirm** before treating it as a false positive
+4. **Do not declare completion** until the user explicitly says "treat this as a false positive"
+
+### Why `.unwrap_or("")` is not a false positive in data pipelines
+
+`serde_json::Value::as_str().unwrap_or("")` compiles and runs. That is not the standard. The rule is:
+- If the field is **required** for the function to produce correct output (e.g. `outline`, `content`, `world_setting`, `seed`), a missing value must return `Err`, not an empty string
+- Empty string silently propagates to LLM prompts, producing garbage output with no visible error
+- "It's standard serde_json API" does not make it correct to use on required fields
+
+---
+
 ## NO REGRESSION TO FIX ERRORS
 
 When you encounter a compiler error, type error, lint warning, or test failure, you MUST fix the root cause. **Simplifying, removing, or downgrading code to make the error disappear is FORBIDDEN.**
