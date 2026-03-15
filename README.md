@@ -104,7 +104,7 @@ cp ../CLAUDE.md ~/.claude/CLAUDE.md
         "hooks": [
           {
             "type": "command",
-            "command": "node -e \"const path=require('path');const fs=require('fs');const {execSync}=require('child_process');const args=JSON.parse(process.env.CLAUDE_TOOL_ARGS||'{}');const fp=args.file_path||args.path||'';const exts=['.rs','.ts','.tsx','.go','.java','.py','.zig','.js'];const CLI='/your/path/to/minimax-precision-mcp/dist/validate-cli.js';let blocked=false;if(fp&&exts.includes(path.extname(fp))&&fs.existsSync(CLI)){try{const r=execSync('node '+CLI+' --file '+JSON.stringify(fp),{encoding:'utf-8',stdio:['ignore','pipe','pipe']});process.stdout.write(r);}catch(e){process.stdout.write(e.stdout||'');blocked=true;}let proj='';const parts=path.resolve(fp).split(path.sep);for(let i=parts.length-1;i>0;i--){const d=parts.slice(0,i).join(path.sep);if(d&&(fs.existsSync(d+'/Cargo.toml')||fs.existsSync(d+'/package.json')||fs.existsSync(d+'/go.mod'))){proj=d;break;}}if(proj){try{const r2=execSync('node '+CLI+' --project '+JSON.stringify(proj),{encoding:'utf-8',stdio:['ignore','pipe','pipe']});process.stdout.write(r2);}catch(e){process.stdout.write(e.stdout||'');blocked=true;}}}if(blocked)process.exit(1);\"",
+            "command": "node -e \"const path=require('path');const fs=require('fs');const {execSync}=require('child_process');const args=JSON.parse(process.env.CLAUDE_TOOL_ARGS||'{}');const fp=args.file_path||args.path||'';const exts=['.rs','.ts','.tsx','.go','.java','.py','.zig','.js'];const CLI='/your/path/to/minimax-precision-mcp/dist/validate-cli.js';let blocked=false;let out='';if(fp&&exts.includes(path.extname(fp))&&fs.existsSync(CLI)){try{out+=execSync('node '+CLI+' --file '+JSON.stringify(fp),{encoding:'utf-8',stdio:['ignore','pipe','pipe']});}catch(e){out+=(e.stdout||'');blocked=true;}let proj='';const parts=path.resolve(fp).split(path.sep);for(let i=parts.length-1;i>0;i--){const d=parts.slice(0,i).join(path.sep);if(d&&(fs.existsSync(d+'/Cargo.toml')||fs.existsSync(d+'/package.json')||fs.existsSync(d+'/go.mod'))){proj=d;break;}}if(proj){try{out+=execSync('node '+CLI+' --project '+JSON.stringify(proj),{encoding:'utf-8',stdio:['ignore','pipe','pipe']});}catch(e){out+=(e.stdout||'');blocked=true;}}}if(blocked){process.stderr.write(out);process.exit(2);}else{if(out)process.stdout.write(out);process.exit(0);}\"",
             "statusMessage": "MCP 门控检查..."
           }
         ]
@@ -115,7 +115,7 @@ cp ../CLAUDE.md ~/.claude/CLAUDE.md
         "hooks": [
           {
             "type": "command",
-            "command": "node -e \"const path=require('path');const fs=require('fs');const {execSync}=require('child_process');const CLI='/your/path/to/minimax-precision-mcp/dist/validate-cli.js';if(!fs.existsSync(CLI))process.exit(0);const parts=path.resolve(process.cwd()).split(path.sep);let proj='';for(let i=parts.length;i>0;i--){const d=parts.slice(0,i).join(path.sep);if(d&&(fs.existsSync(d+'/Cargo.toml')||fs.existsSync(d+'/package.json')||fs.existsSync(d+'/go.mod'))){proj=d;break;}}if(!proj)process.exit(0);try{execSync('node '+CLI+' --project '+JSON.stringify(proj),{encoding:'utf-8',stdio:['ignore','pipe','pipe']});process.exit(0);}catch(e){process.stdout.write(e.stdout||'');process.exit(1);}\"",
+            "command": "node -e \"const path=require('path');const fs=require('fs');const {execSync}=require('child_process');const CLI='/your/path/to/minimax-precision-mcp/dist/validate-cli.js';if(!fs.existsSync(CLI))process.exit(0);const parts=path.resolve(process.cwd()).split(path.sep);let proj='';for(let i=parts.length;i>0;i--){const d=parts.slice(0,i).join(path.sep);if(d&&(fs.existsSync(d+'/Cargo.toml')||fs.existsSync(d+'/package.json')||fs.existsSync(d+'/go.mod'))){proj=d;break;}}if(!proj)process.exit(0);try{execSync('node '+CLI+' --gate '+JSON.stringify(proj),{encoding:'utf-8',stdio:['ignore','pipe','pipe']});process.exit(0);}catch(e){process.stdout.write(JSON.stringify({decision:'block',reason:(e.stdout||'MCP gate: blockers found')}));process.exit(0);}\"",
             "statusMessage": "MCP 最终架构检查..."
           }
         ]
@@ -125,9 +125,14 @@ cp ../CLAUDE.md ~/.claude/CLAUDE.md
 }
 ```
 
-**关键：** 两个 hook 在发现 blocker 时均以 **exit 1** 退出。
-- PostToolUse exit 1 → Claude Code 将输出作为强制反馈注入，模型必须先响应才能继续下一步
-- Stop exit 1 → Claude Code 拒绝模型停止，将输出作为新消息投回对话，模型必须修复后才能结束
+**exit code 说明（按官方文档）：**
+
+| Hook | 有 blocker 时 | 无 blocker 时 | 效果 |
+|------|-------------|-------------|------|
+| PostToolUse | `exit 2` + 写 stderr | `exit 0` | exit 2 → stderr 投回模型作为错误消息 |
+| Stop | `exit 0` + stdout JSON `{"decision":"block","reason":"..."}` | `exit 0` | JSON decision:block → 阻断停止，reason 投回模型 |
+
+**注意：** `exit 1` 在两种 hook 中均为"非阻塞错误"，模型**完全看不到**输出。之前的配置使用 exit 1 是错误的。
 
 #### 第五步（可选）：安装 `/mcp-gate` Skill
 
