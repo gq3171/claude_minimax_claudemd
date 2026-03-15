@@ -91,10 +91,22 @@ export class ProjectValidator {
 
     const entryContent = fs.readFileSync(entryPath, "utf-8");
 
+    // When both main.rs and lib.rs exist, lib.rs is the module registry.
+    // main.rs typically uses `use <crate>::module::Type` (external path),
+    // NOT `mod module;` — so we must also scan lib.rs for module declarations.
+    const libRsPath = path.join(projectPath, "src", "lib.rs");
+    const libContent =
+      entryPath !== libRsPath && fs.existsSync(libRsPath)
+        ? fs.readFileSync(libRsPath, "utf-8")
+        : "";
+
+    // Combined "wiring scope": module names declared in EITHER entry file
+    const wiringScope = entryContent + "\n" + libContent;
+
     // Collect all potential module names from two sources:
-    // 1. `mod xxx;` declarations in the entry file
+    // 1. `mod xxx;` declarations in the entry file OR lib.rs
     // 2. Subdirectories in src/ that contain mod.rs
-    const declaredMods = this.extractRustModDeclarations(entryContent);
+    const declaredMods = this.extractRustModDeclarations(wiringScope);
     const srcDir = path.join(projectPath, "src");
     let allDirs: string[] = [];
     try {
@@ -130,16 +142,18 @@ export class ProjectValidator {
       const publicItems = this.extractRustPublicItems(modContent);
       if (publicItems.length === 0) continue; // trivial module, skip
 
-      // A module is "connected" if: it's declared AND at least one public item appears in entry
+      // A module is "connected" if: it's declared in lib.rs or main.rs AND
+      // at least one public item appears anywhere in the wiring scope
+      // (covers both `use crate::mod::Type` and `use crate_name::mod::Type` patterns)
       const isDeclared =
-        entryContent.includes(`mod ${modName}`) ||
-        entryContent.includes(`use ${modName}`) ||
-        entryContent.includes(`use crate::${modName}`);
+        wiringScope.includes(`mod ${modName}`) ||
+        wiringScope.includes(`use ${modName}`) ||
+        wiringScope.includes(`use crate::${modName}`);
 
       const usedItems = publicItems.filter(
         (item) =>
-          entryContent.includes(item) ||
-          entryContent.includes(`${modName}::${item}`)
+          wiringScope.includes(item) ||
+          wiringScope.includes(`${modName}::${item}`)
       );
 
       if (!isDeclared || usedItems.length === 0) {
@@ -162,10 +176,11 @@ export class ProjectValidator {
     }
 
     // Coordinator pattern: if a Coordinator struct is defined anywhere, it must be instantiated in main
+    // Pass wiringScope (main.rs + lib.rs) so external-path calls like `nooov::Coordinator::new()` are found
     const coordinatorFindings = this.checkRustCoordinatorPattern(
       srcDir,
       entryPath,
-      entryContent
+      wiringScope
     );
     findings.push(...coordinatorFindings);
 
