@@ -173,6 +173,10 @@ export class ProjectValidator {
     const traitFindings = this.checkRustTraitMethodCalls(srcDir);
     findings.push(...traitFindings);
 
+    // Zero tests check: if no #[test] exists anywhere in src/, it's a blocker
+    const testFindings = this.checkRustTestCoverage(srcDir);
+    findings.push(...testFindings);
+
     return this.buildResult(
       projectPath,
       "rust",
@@ -338,6 +342,43 @@ export class ProjectValidator {
     }
 
     return findings;
+  }
+
+  /**
+   * Checks that the Rust project has at least one #[test] function.
+   * "cargo test" showing "running 0 tests" is a failure — this gate enforces that.
+   * Only flags as a blocker when there are substantial modules (>2 src subdirs),
+   * to avoid false positives on trivially small library crates.
+   */
+  private checkRustTestCoverage(srcDir: string): ProjectFinding[] {
+    const rsFiles = this.walkRsFiles(srcDir);
+    const hasAnyTest = rsFiles.some(fp => {
+      try {
+        const content = fs.readFileSync(fp, 'utf-8');
+        return content.includes('#[test]') || content.includes('#[cfg(test)]');
+      } catch {
+        return false;
+      }
+    });
+
+    if (hasAnyTest) return [];
+
+    // Count substantive source files (excluding mod.rs / lib.rs / main.rs)
+    const substantiveFiles = rsFiles.filter(fp => {
+      const base = path.basename(fp);
+      return base !== 'main.rs' && base !== 'lib.rs' && base !== 'mod.rs';
+    });
+
+    // Only flag as a blocker if the project is non-trivial (has real modules)
+    const severity: 'critical' | 'warning' = substantiveFiles.length >= 2 ? 'critical' : 'warning';
+
+    return [{
+      category: 'missing_tests',
+      severity,
+      location: srcDir,
+      message: `No tests found in project (${rsFiles.length} .rs files, 0 #[test] functions) — "cargo test" will show "running 0 tests"`,
+      suggestion: 'Add at least one integration test that calls the main workflow end-to-end with a mock dependency. Unit tests alone are insufficient — there must be a test that exercises the full execution path.'
+    }];
   }
 
   /** Recursively collect all .rs files under a directory (depth-limited) */

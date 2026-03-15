@@ -170,6 +170,51 @@ export { s, a };
     expect(result.verdict).toContain("✅ PASSED");
   });
 
+  it("blocks when Rust project has no tests at all", () => {
+    const projDir = makeDir("rust_no_tests");
+    writeFile(path.join(projDir, "Cargo.toml"), '[package]\nname="test"\nversion="0.1.0"\nedition="2021"\n');
+    writeFile(path.join(projDir, "src", "main.rs"), `
+mod agent;
+mod config;
+fn main() { println!("hello"); }
+`);
+    writeFile(path.join(projDir, "src", "agent.rs"), `pub struct Agent; impl Agent { pub fn run(&self) {} }`);
+    writeFile(path.join(projDir, "src", "config.rs"), `pub struct Config; impl Config { pub fn load() -> Self { Self } }`);
+
+    const result = validator.validateProject(projDir);
+    const testBlocker = result.blockers.find(b => b.category === "missing_tests");
+    expect(testBlocker).toBeDefined();
+    expect(testBlocker?.severity).toBe("critical");
+    expect(testBlocker?.message).toContain("0 #[test]");
+  });
+
+  it("passes zero-test check when project has #[test] functions", () => {
+    const projDir = makeDir("rust_has_tests");
+    writeFile(path.join(projDir, "Cargo.toml"), '[package]\nname="test"\nversion="0.1.0"\nedition="2021"\n');
+    writeFile(path.join(projDir, "src", "main.rs"), `
+mod agent;
+fn main() { println!("hello"); }
+`);
+    writeFile(path.join(projDir, "src", "agent.rs"), `
+pub struct Agent;
+impl Agent { pub fn run(&self) -> String { "done".to_string() } }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn test_agent_run() {
+        let a = Agent;
+        assert_eq!(a.run(), "done");
+    }
+}
+`);
+
+    const result = validator.validateProject(projDir);
+    const testBlocker = result.blockers.find(b => b.category === "missing_tests");
+    expect(testBlocker).toBeUndefined();
+  });
+
   it("warns when a TypeScript file is not imported in index.ts", () => {
     const projDir = makeDir("ts_dead");
     writeFile(path.join(projDir, "package.json"), '{"name":"test"}');

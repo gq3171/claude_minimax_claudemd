@@ -99,7 +99,8 @@ export interface ProjectFinding {
     | "missing_entry"
     | "disconnected_subsystem"
     | "trait_mismatch"
-    | "unused_import";
+    | "unused_import"
+    | "missing_tests";
   severity: "critical" | "error" | "warning";
   /** File or directory path that triggered this finding */
   location: string;

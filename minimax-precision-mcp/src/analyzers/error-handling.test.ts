@@ -89,4 +89,74 @@ describe('ErrorHandlingAnalyzer', () => {
     const unwrapIssues = issues.filter(i => i.message.includes('will panic') || i.message.includes('.unwrap() after'));
     expect(unwrapIssues.length).toBe(0);
   });
+
+  it('detects #![allow(dead_code)] crate-level suppressor as error', () => {
+    const code = '#![allow(dead_code)]\npub fn foo() {}';
+    const issues = analyzer.analyze(code, 'src/lib.rs');
+    const crateIssues = issues.filter(i => i.message.includes('#![allow(dead_code)]'));
+    expect(crateIssues.length).toBe(1);
+    expect(crateIssues[0].severity).toBe('error');
+    expect(crateIssues[0].location.line).toBe(1);
+  });
+
+  it('detects #![allow(unused_variables)] as error', () => {
+    const code = '#![allow(unused_variables)]\nfn main() { let x = 1; }';
+    const issues = analyzer.analyze(code, 'src/main.rs');
+    const crateIssues = issues.filter(i => i.message.includes('unused_variables'));
+    expect(crateIssues.length).toBe(1);
+    expect(crateIssues[0].severity).toBe('error');
+  });
+
+  it('detects let _name = expr as error', () => {
+    const code = [
+      'async fn plan_tasks(&self) -> Result<Vec<Task>> {',
+      '    let _response = provider.chat(messages).await?;',
+      '    Ok(vec![])',
+      '}',
+    ].join('\n');
+    const issues = analyzer.analyze(code, 'src/agent.rs');
+    const discardIssues = issues.filter(i => i.message.includes('discards the computed value'));
+    expect(discardIssues.length).toBe(1);
+    expect(discardIssues[0].severity).toBe('error');
+    expect(discardIssues[0].message).toContain('_response');
+  });
+
+  it('does not flag let _name inside test block', () => {
+    const code = [
+      '#[cfg(test)]',
+      'mod tests {',
+      '  #[test]',
+      '  fn test_foo() {',
+      '    let _result = compute();',
+      '  }',
+      '}',
+    ].join('\n');
+    const issues = analyzer.analyze(code, 'src/lib.rs');
+    const discardIssues = issues.filter(i => i.message.includes('discards the computed value'));
+    expect(discardIssues.length).toBe(0);
+  });
+
+  it('detects single-line None stub return as warning', () => {
+    const code = [
+      'fn get_agent(&self, task: TaskType) -> Option<&dyn SubAgent> {',
+      '    None',
+      '}',
+    ].join('\n');
+    const issues = analyzer.analyze(code, 'src/executor.rs');
+    const stubIssues = issues.filter(i => i.message.includes('stub return'));
+    expect(stubIssues.length).toBe(1);
+    expect(stubIssues[0].severity).toBe('warning');
+  });
+
+  it('detects single-line Ok(vec![]) stub return as warning', () => {
+    const code = [
+      'fn list_tasks(&self) -> Result<Vec<Task>> {',
+      '    Ok(vec![])',
+      '}',
+    ].join('\n');
+    const issues = analyzer.analyze(code, 'src/runner.rs');
+    const stubIssues = issues.filter(i => i.message.includes('stub return'));
+    expect(stubIssues.length).toBe(1);
+    expect(stubIssues[0].severity).toBe('warning');
+  });
 });
