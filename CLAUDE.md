@@ -108,39 +108,21 @@ find src/ -name "*.rs" -o -name "*.ts" -o -name "*.go" -o -name "*.java" | xargs
 - If any file has 0-3 lines (excluding blank lines and single-line comments): that file is a placeholder. Implement it or delete it.
 - A file containing only comments, module declarations, or `use` statements is NOT implemented.
 
-### Step 1c - MCP Gate Check (MANDATORY, non-skippable)
+### Step 1c — Validate hook runs automatically; you must respond
 
-**After writing or editing ANY source file**, call the `validate_file` MCP tool on that file:
+After you write or edit any source file, the **PostToolUse hook validates the file automatically** via `validate-cli`. You do not need to call any tool — it runs on every write whether you ask it to or not.
 
-```
-validate_file(file_path: "<modified file>")
-```
+**Your only job is to read and act on the hook output:**
 
-**Rules:**
-- If `passed: false` → you are **BLOCKED**. Fix every item in `blockers[]`. Then re-call `validate_file`. Repeat until `passed: true`.
-- If `passed: true` → proceed. Warnings in `warnings[]` are informational; fix them if feasible.
-- Do NOT proceed to Step 2 while any file has `passed: false`.
-- After all file edits are done, call `scan_placeholders(path: "src/")` once. If any placeholders are found, fix them and re-run `validate_file` on the affected files.
+- If the output contains `BLOCKED` or `╔══ BLOCKED` → **stop immediately**. Do NOT write any other file. Fix every blocker listed, then re-save the file. The hook will re-run automatically on the next write.
+- If the output shows only warnings → fix if feasible, then continue.
+- If the output is empty or shows `PASSED` → continue.
 
-**This step is NOT optional.** "I think it's fine" / "the build passes" are NOT substitutes for `validate_file` returning `passed: true`.
+**CRITICAL: Never proceed to the next file while any file has unresolved blockers.**
 
-### Step 1d - Project Architecture Check (MANDATORY after all files done)
+The Stop hook also validates the entire project when you finish — if blockers remain it will block your response from completing.
 
-**After all source files are written/edited**, call the `validate_project` MCP tool on the project root:
-
-```
-validate_project(path: "<project root dir>")
-```
-
-**Rules:**
-- If `passed: false` → you are **BLOCKED**. Fix every item in `blockers[]`:
-  - `dead_module`: Wire the module into the main execution path (add `mod xxx;` and instantiate/call its types from the entry file)
-  - `disconnected_subsystem`: Instantiate the Coordinator/Manager/Handler and call its methods from main
-  - `trait_mismatch`: Add the missing method to the trait definition, then implement it in all impls
-- Re-call `validate_project` after every fix. Repeat until `passed: true`.
-- Do NOT proceed to Step 2 while `validate_project` returns `passed: false`.
-
-**This step is NOT optional.** Unit tests passing for individual components does NOT mean the system works — validate_project must confirm all subsystems are connected.
+**This step is NOT optional.** "The build passes" is NOT a substitute for the hook reporting PASSED.
 
 ### Step 2 - Build & Lint & Test by language:
 
