@@ -189,4 +189,25 @@ describe('ErrorHandlingAnalyzer', () => {
     const fakeDataIssues = issues.filter(i => i.message.includes('fake data'));
     expect(fakeDataIssues.length).toBe(0);
   });
+
+  it('detects .unwrap_or(json!({ "approved": true })) as error', () => {
+    const code = [
+      'let result: Value = serde_json::from_str(&resp)',
+      '    .unwrap_or(serde_json::json!({',
+      '        "approved": true,',
+      '        "score": 80',
+      '    }));',
+    ].join('\n');
+    const issues = analyzer.analyze(code, 'src/reviewer.rs');
+    const fakeDataIssues = issues.filter(i => i.message.includes('JSON object'));
+    expect(fakeDataIssues.length).toBe(1);
+    expect(fakeDataIssues[0].severity).toBe('error');
+  });
+
+  it('detects .unwrap_or(json!({ with shorthand macro', () => {
+    const code = 'let v = parse().unwrap_or(json!({ "ok": true }));';
+    const issues = analyzer.analyze(code, 'src/agent.rs');
+    const fakeDataIssues = issues.filter(i => i.message.includes('JSON object'));
+    expect(fakeDataIssues.length).toBe(1);
+  });
 });

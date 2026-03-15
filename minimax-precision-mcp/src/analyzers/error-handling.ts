@@ -185,6 +185,20 @@ export class ErrorHandlingAnalyzer {
         });
       }
 
+      // .unwrap_or(json!({ "approved": true, ... })) — serde_json 宏假数据兜底
+      // 解析失败时返回 JSON 对象字面量，让下游代码收到"成功"的虚假数据
+      // 最危险的形式是包含 approved/success/ok = true 的默认值
+      if (line.match(/\.unwrap_or\s*\(\s*(?:serde_json\s*::\s*)?json!\s*\(\s*\{/) ||
+          line.match(/\.unwrap_or\s*\(\s*(?:serde_json\s*::\s*)?Value::Object/)) {
+        issues.push({
+          type: "error_handling",
+          message: '.unwrap_or(json!({ ... })) substitutes a hardcoded JSON object on parse failure — downstream code receives fabricated "success" data',
+          location: { file: filePath, line: lineNumber },
+          severity: 'error',
+          suggestion: 'Return Err(...) on parse failure. If a fallback is unavoidable, log the original error first and never use approved:true/success:true as defaults.'
+        });
+      }
+
       // .unwrap_or(TypeName { ... }) / .unwrap_or(TypeName::new()) — 假数据兜底
       // 这种模式在解析失败时返回硬编码的结构体（如 ReviewResult { score: 5.0 }），
       // 让下游代码收到看起来合法的虚假数据，掩盖了真实错误（如 LLM 返回格式不对）

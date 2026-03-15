@@ -241,6 +241,31 @@ mod tests { use super::*; #[test] fn test_run() { assert_eq!(Agent.run(), "done"
     expect(emptyBlocker?.message).toContain("empty placeholder");
   });
 
+  it("detects Pipeline struct as disconnected_subsystem when not called in main", () => {
+    const projDir = makeDir("rust_pipeline_disconnected");
+    writeFile(path.join(projDir, "Cargo.toml"), '[package]\nname="test"\nversion="0.1.0"\nedition="2021"\n');
+    writeFile(path.join(projDir, "src", "main.rs"), `
+mod pipeline;
+fn main() { println!("hello"); }
+`);
+    writeFile(path.join(projDir, "src", "pipeline", "mod.rs"), `
+pub struct Pipeline { pub name: String }
+impl Pipeline {
+    pub fn new(name: String) -> Self { Self { name } }
+    pub fn run(&self) { println!("{}", self.name); }
+}
+#[cfg(test)]
+mod tests { use super::*; #[test] fn test_new() { let p = Pipeline::new("x".into()); assert_eq!(p.name, "x"); } }
+`);
+
+    const result = validator.validateProject(projDir);
+    const blocker = result.blockers.find(b =>
+      b.category === "disconnected_subsystem" && b.message.includes("Pipeline")
+    );
+    expect(blocker).toBeDefined();
+    expect(blocker?.severity).toBe("error");
+  });
+
   it("detects Coordinator defined but tests never call it as warning", () => {
     const projDir = makeDir("rust_coordinator_no_test");
     writeFile(path.join(projDir, "Cargo.toml"), '[package]\nname="test"\nversion="0.1.0"\nedition="2021"\n');

@@ -242,19 +242,24 @@ export class ProjectValidator {
   }
 
   /**
-   * Detects the anti-pattern: Coordinator struct is defined in a module
-   * but Coordinator::new() is never called in the entry file.
+   * Detects the anti-pattern: an orchestrator struct (Coordinator, Pipeline,
+   * Manager, Orchestrator, Workflow, Runner, Engine) is defined but never
+   * instantiated from the entry file.
+   *
+   * Covers naming conventions beyond just "Coordinator" — projects use
+   * Pipeline, WorkflowManager, AgentOrchestrator, etc.
    */
   private checkRustCoordinatorPattern(
     srcDir: string,
     entryPath: string,
-    entryContent: string
+    wiringScope: string
   ): ProjectFinding[] {
     const findings: ProjectFinding[] = [];
-    const coordinatorDefRegex = /pub\s+struct\s+Coordinator\b/;
-    const coordinatorUseRegex = /Coordinator\s*::\s*new\s*\(/;
 
-    // Walk src/ to find any file declaring a Coordinator struct
+    // Common orchestrator naming patterns — struct names that imply "main driver"
+    const orchestratorNamePattern =
+      /pub\s+struct\s+((?:\w*(?:Coordinator|Pipeline|Orchestrator|Workflow|Runner|Engine)\w*|(?:App|Main)Manager))\b/;
+
     const rsFiles = this.walkRsFiles(srcDir);
     for (const fp of rsFiles) {
       let content: string;
@@ -263,20 +268,31 @@ export class ProjectValidator {
       } catch {
         continue;
       }
-      if (coordinatorDefRegex.test(content) && !coordinatorUseRegex.test(entryContent)) {
+
+      const nameMatch = orchestratorNamePattern.exec(content);
+      if (!nameMatch) continue;
+
+      const structName = nameMatch[1];
+
+      // Check if ::new() or struct literal initialisation appears in wiring scope
+      const isInstantiated =
+        wiringScope.includes(`${structName}::new(`) ||
+        wiringScope.includes(`${structName} {`);
+
+      if (!isInstantiated) {
         findings.push({
           category: "disconnected_subsystem",
           severity: "error",
           location: fp,
-          message: `Coordinator struct is defined in '${path.relative(
+          message: `'${structName}' struct is defined in '${path.relative(
             srcDir,
             fp
-          )}' but Coordinator::new() is never called in ${path.basename(entryPath)}`,
-          suggestion: `Instantiate Coordinator in ${path.basename(
+          )}' but ${structName}::new() is never called in ${path.basename(entryPath)}`,
+          suggestion: `Instantiate ${structName} in ${path.basename(
             entryPath
-          )}, register agents, and call execute_sequential() or execute_all_parallel() to drive the AI workflow`,
+          )} and call its run()/execute() method to drive the workflow`,
         });
-        break; // Report once per project
+        break; // one report per project is enough
       }
     }
 
