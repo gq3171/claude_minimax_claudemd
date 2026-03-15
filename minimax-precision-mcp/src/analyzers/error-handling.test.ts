@@ -159,4 +159,34 @@ describe('ErrorHandlingAnalyzer', () => {
     expect(stubIssues.length).toBe(1);
     expect(stubIssues[0].severity).toBe('warning');
   });
+
+  it('detects .unwrap_or(StructLiteral { ... }) fake data fallback as error', () => {
+    const code = [
+      'let result: ReviewResult = serde_json::from_str(&response)',
+      '    .unwrap_or(ReviewResult {',
+      '        score: 5.0,',
+      '        issues: vec!["parse failed".to_string()],',
+      '    });',
+    ].join('\n');
+    const issues = analyzer.analyze(code, 'src/reviewer.rs');
+    const fakeDataIssues = issues.filter(i => i.message.includes('fake data'));
+    expect(fakeDataIssues.length).toBe(1);
+    expect(fakeDataIssues[0].severity).toBe('error');
+    expect(fakeDataIssues[0].message).toContain('StructLiteral');
+  });
+
+  it('detects .unwrap_or(TypeName::new()) fake fallback as error', () => {
+    const code = 'let cfg = load_config().unwrap_or(Config::new());';
+    const issues = analyzer.analyze(code, 'src/main.rs');
+    const fakeDataIssues = issues.filter(i => i.message.includes('fake data'));
+    expect(fakeDataIssues.length).toBe(1);
+    expect(fakeDataIssues[0].severity).toBe('error');
+  });
+
+  it('does not flag .unwrap_or(5) as fake struct fallback', () => {
+    const code = 'let x = opt.unwrap_or(5);';
+    const issues = analyzer.analyze(code, 'src/lib.rs');
+    const fakeDataIssues = issues.filter(i => i.message.includes('fake data'));
+    expect(fakeDataIssues.length).toBe(0);
+  });
 });

@@ -177,6 +177,14 @@ export class ProjectValidator {
     const testFindings = this.checkRustTestCoverage(srcDir);
     findings.push(...testFindings);
 
+    // Empty module files: .rs files with < 3 real lines of code
+    const emptyModFindings = this.checkRustEmptyModules(srcDir);
+    findings.push(...emptyModFindings);
+
+    // Integration test coverage: Coordinator defined but tests never call it
+    const integrationFindings = this.checkRustIntegrationTestCoverage(srcDir, projectPath);
+    findings.push(...integrationFindings);
+
     return this.buildResult(
       projectPath,
       "rust",
@@ -379,6 +387,109 @@ export class ProjectValidator {
       message: `No tests found in project (${rsFiles.length} .rs files, 0 #[test] functions) — "cargo test" will show "running 0 tests"`,
       suggestion: 'Add at least one integration test that calls the main workflow end-to-end with a mock dependency. Unit tests alone are insufficient — there must be a test that exercises the full execution path.'
     }];
+  }
+
+  /**
+   * Detects .rs files that are effectively empty placeholders:
+   * < 3 real lines of code (non-blank, non-comment-only).
+   * These are "ghost module" files — declared in mod.rs but containing nothing.
+   */
+  private checkRustEmptyModules(srcDir: string): ProjectFinding[] {
+    const findings: ProjectFinding[] = [];
+    const rsFiles = this.walkRsFiles(srcDir);
+
+    for (const fp of rsFiles) {
+      const base = path.basename(fp);
+      // Skip conventional entry/aggregator files — their job may legitimately be just declarations
+      if (base === 'main.rs' || base === 'lib.rs' || base === 'mod.rs') continue;
+
+      let content: string;
+      try {
+        content = fs.readFileSync(fp, 'utf-8');
+      } catch {
+        continue;
+      }
+
+      // Count lines that carry real code (skip blank lines and comment-only lines)
+      const realLines = content.split('\n').filter(line => {
+        const trimmed = line.trim();
+        return (
+          trimmed.length > 0 &&
+          !trimmed.startsWith('//') &&
+          !trimmed.startsWith('/*') &&
+          !trimmed.startsWith('*') &&
+          !trimmed.startsWith('#') // attribute macros are not logic
+        );
+      });
+
+      if (realLines.length < 3) {
+        findings.push({
+          category: 'dead_module',
+          severity: 'error',
+          location: fp,
+          message: `File '${path.relative(srcDir, fp)}' has only ${realLines.length} real line(s) — it is an empty placeholder module with no implementation`,
+          suggestion: `Either implement the module's intended logic or delete the file and remove its 'mod ${path.basename(fp, '.rs')};' declaration`
+        });
+      }
+    }
+
+    return findings;
+  }
+
+  /**
+   * If a Coordinator struct is defined AND tests exist, but no test ever
+   * calls Coordinator::new() or coordinator.run(), the main workflow is
+   * never exercised — report a warning.
+   */
+  private checkRustIntegrationTestCoverage(srcDir: string, projectPath: string): ProjectFinding[] {
+    const rsFiles = this.walkRsFiles(srcDir);
+
+    // Only applies when a Coordinator struct exists
+    const hasCoordinator = rsFiles.some(fp => {
+      try {
+        return /pub\s+struct\s+Coordinator\b/.test(fs.readFileSync(fp, 'utf-8'));
+      } catch { return false; }
+    });
+    if (!hasCoordinator) return [];
+
+    // Collect all .rs content that lives under a test context:
+    // - files in tests/ directory
+    // - inline #[cfg(test)] blocks in src/ files
+    const testsDir = path.join(projectPath, 'tests');
+    const testFilePaths: string[] = [];
+    if (fs.existsSync(testsDir)) {
+      try {
+        fs.readdirSync(testsDir, { withFileTypes: true })
+          .filter(e => e.isFile() && e.name.endsWith('.rs'))
+          .forEach(e => testFilePaths.push(path.join(testsDir, e.name)));
+      } catch { /* ignore */ }
+    }
+    rsFiles.forEach(fp => testFilePaths.push(fp)); // also covers inline tests
+
+    const allTestContent = testFilePaths.map(fp => {
+      try { return fs.readFileSync(fp, 'utf-8'); } catch { return ''; }
+    }).join('\n');
+
+    // If no tests exist at all, checkRustTestCoverage already handles it
+    if (!allTestContent.includes('#[test]')) return [];
+
+    // Tests exist — check whether any of them exercises the Coordinator
+    const coordinatorCalledInTests =
+      /Coordinator\s*::\s*new\s*\(/.test(allTestContent) ||
+      /coordinator\s*\.\s*run\s*\(/.test(allTestContent) ||
+      /coordinator\s*\.\s*execute\s*\(/.test(allTestContent);
+
+    if (!coordinatorCalledInTests) {
+      return [{
+        category: 'disconnected_subsystem',
+        severity: 'warning',
+        location: srcDir,
+        message: 'Tests exist but none call Coordinator::new() or coordinator.run() — the main multi-agent workflow is never exercised end-to-end',
+        suggestion: 'Add at least one integration test that instantiates Coordinator with mock LLM agents and calls run(project) to verify the full workflow produces meaningful output'
+      }];
+    }
+
+    return [];
   }
 
   /** Recursively collect all .rs files under a directory (depth-limited) */

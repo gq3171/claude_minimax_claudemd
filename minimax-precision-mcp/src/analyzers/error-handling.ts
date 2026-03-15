@@ -184,6 +184,20 @@ export class ErrorHandlingAnalyzer {
           suggestion: 'At minimum, log the error before providing fallback value'
         });
       }
+
+      // .unwrap_or(TypeName { ... }) / .unwrap_or(TypeName::new()) — 假数据兜底
+      // 这种模式在解析失败时返回硬编码的结构体（如 ReviewResult { score: 5.0 }），
+      // 让下游代码收到看起来合法的虚假数据，掩盖了真实错误（如 LLM 返回格式不对）
+      if (line.match(/\.unwrap_or\s*\(\s*[A-Z]\w*\s*\{/) ||
+          line.match(/\.unwrap_or\s*\(\s*[A-Z]\w*\s*::\s*new\s*\(/)) {
+        issues.push({
+          type: "error_handling",
+          message: '.unwrap_or(StructLiteral { ... }) substitutes hardcoded fake data on error — the real error is silently swallowed and downstream code receives fabricated values',
+          location: { file: filePath, line: lineNumber },
+          severity: 'error',
+          suggestion: 'Return Err(...) or propagate with ? instead of substituting fake data. If a fallback is truly needed, at minimum log the original error first.'
+        });
+      }
     });
 
     return issues;

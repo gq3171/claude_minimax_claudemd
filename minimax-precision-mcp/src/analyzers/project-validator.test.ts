@@ -215,6 +215,63 @@ mod tests {
     expect(testBlocker).toBeUndefined();
   });
 
+  it("detects empty placeholder .rs module file as error", () => {
+    const projDir = makeDir("rust_empty_module");
+    writeFile(path.join(projDir, "Cargo.toml"), '[package]\nname="test"\nversion="0.1.0"\nedition="2021"\n');
+    writeFile(path.join(projDir, "src", "main.rs"), `
+mod agent;
+mod workflow;
+fn main() { println!("hello"); }
+`);
+    writeFile(path.join(projDir, "src", "agent.rs"), `
+pub struct Agent;
+impl Agent { pub fn run(&self) -> String { "done".to_string() } }
+#[cfg(test)]
+mod tests { use super::*; #[test] fn test_run() { assert_eq!(Agent.run(), "done"); } }
+`);
+    // workflow.rs is a ghost file — only a comment
+    writeFile(path.join(projDir, "src", "workflow.rs"), "// 工作流配置相关\n");
+
+    const result = validator.validateProject(projDir);
+    const emptyBlocker = result.blockers.find(b =>
+      b.category === "dead_module" && b.message.includes("workflow")
+    );
+    expect(emptyBlocker).toBeDefined();
+    expect(emptyBlocker?.severity).toBe("error");
+    expect(emptyBlocker?.message).toContain("empty placeholder");
+  });
+
+  it("detects Coordinator defined but tests never call it as warning", () => {
+    const projDir = makeDir("rust_coordinator_no_test");
+    writeFile(path.join(projDir, "Cargo.toml"), '[package]\nname="test"\nversion="0.1.0"\nedition="2021"\n');
+    writeFile(path.join(projDir, "src", "main.rs"), `
+mod coordinator;
+fn main() { println!("hello"); }
+`);
+    writeFile(path.join(projDir, "src", "coordinator", "mod.rs"), `
+pub struct Coordinator { pub name: String }
+impl Coordinator {
+    pub fn new(name: String) -> Self { Self { name } }
+    pub fn run(&self) { println!("{}", self.name); }
+}
+`);
+    // Integration test only tests a model, never touches Coordinator
+    const testsDir = path.join(projDir, "tests");
+    fs.mkdirSync(testsDir, { recursive: true });
+    writeFile(path.join(testsDir, "integration_test.rs"), `
+#[test]
+fn test_something_trivial() {
+    assert_eq!(2 + 2, 4);
+}
+`);
+
+    const result = validator.validateProject(projDir);
+    const integrationWarning = result.warnings.find(w =>
+      w.category === "disconnected_subsystem" && w.message.includes("coordinator.run()")
+    );
+    expect(integrationWarning).toBeDefined();
+  });
+
   it("warns when a TypeScript file is not imported in index.ts", () => {
     const projDir = makeDir("ts_dead");
     writeFile(path.join(projDir, "package.json"), '{"name":"test"}');
