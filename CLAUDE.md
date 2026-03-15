@@ -1,5 +1,33 @@
 # Global Claude Code Rules
 
+## NO REGRESSION TO FIX ERRORS
+
+When you encounter a compiler error, type error, lint warning, or test failure, you MUST fix the root cause. **Simplifying, removing, or downgrading code to make the error disappear is FORBIDDEN.**
+
+### Forbidden "fix by removal" patterns
+
+- Removing a function parameter because it causes an "unused parameter" warning → **fix: use the parameter**
+- Replacing a function body with `Ok(())` / `None` / `vec![]` to make a type error go away → **fix: implement the correct logic**
+- Deleting a `mod xxx;` declaration because the module has compile errors → **fix: fix the module errors**
+- Removing a trait method from an `impl` block because it's hard to implement → **fix: implement it**
+- Changing `async fn` to `fn` to avoid async complexity → **fix: handle async correctly**
+- Removing a struct field because it causes "field never used" → **fix: use the field or restructure**
+- Deleting an import/dependency because it causes a conflict → **fix: resolve the conflict**
+- Replacing a complex type with `()` or `String` to avoid implementing the type → **fix: implement the type**
+- Removing a feature flag or conditional compilation block because it errors → **fix: fix the conditional code**
+- Shortening a function's logic to avoid a borrow checker error → **fix: restructure ownership correctly**
+
+### What to do instead
+
+If you cannot figure out how to fix an error:
+1. **Say so explicitly**: "I'm stuck on this error: [error message]. Here's what I've tried: [attempts]. I need help."
+2. **Never silently regress**: do not make the code worse to make the error go away
+3. **Scope reduction is allowed only with explicit user approval**: if the problem is genuinely out of scope, ask — don't silently remove it
+
+**The test**: after your fix, does the code do everything it did before, plus fix the error? If it does less than before, you have regressed, not fixed.
+
+---
+
 ## CONFIGURATION VALUE PROTECTION
 
 **NEVER silently modify any of the following without first asking the user to confirm:**
