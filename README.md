@@ -9,8 +9,8 @@
 **minimax-precision-mcp** 是一个为 Claude Code CLI 设计的静态分析 MCP 服务，在编译器和 lint 工具之前拦截 AI 生成代码中的常见质量问题。
 
 **三层全自动执行，无需手动干预：**
-- **PostToolUse Hook** — 每次 Write/Edit 后立即检查，发现 blocker 以 exit 1 返回，Claude Code 将输出作为强制反馈注入，模型必须响应
-- **Stop Hook** — 模型准备"完成"时强制跑项目架构检查，发现 blocker 以 exit 1 阻止停止，输出作为新消息强制投回对话
+- **PostToolUse Hook** — 每次 Write/Edit 后立即检查，发现 blocker 以 exit 2 + stderr 返回，Claude Code 将输出作为错误消息投回模型
+- **Stop Hook** — 模型准备"完成"时强制跑项目架构检查，发现 blocker 以 exit 0 + JSON `{"decision":"block"}` 阻止停止，reason 作为新消息强制投回对话
 - **`/mcp-gate` Skill** — 用户主动触发的全量检查（可选）
 
 ---
@@ -151,25 +151,25 @@ cp /path/to/claude_minimax_claudemd/commands/mcp-gate.md ~/.claude/commands/
 AI 生成/修改代码
       ↓  Write/Edit 工具执行
 [PostToolUse Hook 自动运行]
-  ├─ --file <path>   → 文件级检查（placeholder、error_handling、data_flow...）
-  └─ --project <dir> → 架构级检查（dead_module、missing_tests...）
+  ├─ --file <path>  → 文件级检查（placeholder、error_handling、data_flow...）
+  └─ --project <dir>→ 架构级检查（dead_module、missing_tests...）
       ↓
 [MCP ✅ PASSED]  → exit 0 → 继续下一个文件
-[MCP ❌ BLOCKED] → exit 1 → Claude Code 强制反馈，模型必须修复后才能继续
+[MCP ❌ BLOCKED] → exit 2 + stderr → 输出作为错误消息投回模型，模型必须修复后才能继续
 
       ↓  模型准备"完成"时
 [Stop Hook 自动运行]
-  └─ --project <dir> → 最终架构检查
+  └─ --gate <dir> → 全量文件 + 架构检查
       ↓
 [全部通过] → exit 0 → 模型正常结束
-[有 blocker] → exit 1 → Claude Code 拒绝停止，输出作为新消息强制投回
+[有 blocker] → exit 0 + JSON {"decision":"block"} → Claude Code 拒绝停止，reason 作为新消息强制投回
 ```
 
 ---
 
 ### 典型拦截示例
 
-**文件级拦截（PostToolUse，exit 1）：**
+**文件级拦截（PostToolUse，exit 2 + stderr）：**
 
 ```
 [MCP ❌ BLOCKED] src/agent.rs — 2 个问题必须修复:
@@ -186,7 +186,7 @@ AI 生成/修改代码
 ╚══════════════════════════════════════════════════════════════════╝
 ```
 
-**架构级拦截（Stop Hook，exit 1 阻止停止）：**
+**架构级拦截（Stop Hook，exit 0 + JSON decision:block）：**
 
 ```
 [MCP ❌ BLOCKED] PROJECT — 2 个架构问题必须修复:
@@ -254,8 +254,8 @@ npm run lint    # eslint --max-warnings 0
 **minimax-precision-mcp** is a static analysis MCP server for Claude Code CLI. It catches quality issues in AI-generated code that compilers and linters miss, and enforces fixes before the model can move on.
 
 **Three layers of fully automatic enforcement — no manual intervention needed:**
-- **PostToolUse Hook** — runs immediately after every Write/Edit; exits 1 on blockers so Claude Code injects the output as mandatory feedback the model must address
-- **Stop Hook** — fires when the model tries to finish; exits 1 to block the stop, forcing the output back as a new message the model must respond to
+- **PostToolUse Hook** — runs immediately after every Write/Edit; exits 2 via stderr on blockers so Claude Code injects the output as a mandatory error message the model must address
+- **Stop Hook** — fires when the model tries to finish; exits 0 with JSON `{"decision":"block"}` to block the stop, forcing the reason back as a new message the model must respond to
 - **`/mcp-gate` Skill** — optional manual trigger for a comprehensive validation pass
 
 ---
@@ -334,7 +334,7 @@ claude mcp list
 cp ../CLAUDE.md ~/.claude/CLAUDE.md
 ```
 
-This encodes `validate_file` and `validate_project` as mandatory, non-skippable workflow steps.
+This instructs the model to stop immediately when the PostToolUse hook reports BLOCKED, and fix issues before writing the next file.
 
 #### Step 4: Configure hooks
 
@@ -349,7 +349,7 @@ Create or update `~/.claude/settings.json`, replacing `/your/path/to` with your 
         "hooks": [
           {
             "type": "command",
-            "command": "node -e \"const path=require('path');const fs=require('fs');const {execSync}=require('child_process');const args=JSON.parse(process.env.CLAUDE_TOOL_ARGS||'{}');const fp=args.file_path||args.path||'';const exts=['.rs','.ts','.tsx','.go','.java','.py','.zig','.js'];const CLI='/your/path/to/minimax-precision-mcp/dist/validate-cli.js';let blocked=false;if(fp&&exts.includes(path.extname(fp))&&fs.existsSync(CLI)){try{const r=execSync('node '+CLI+' --file '+JSON.stringify(fp),{encoding:'utf-8',stdio:['ignore','pipe','pipe']});process.stdout.write(r);}catch(e){process.stdout.write(e.stdout||'');blocked=true;}let proj='';const parts=path.resolve(fp).split(path.sep);for(let i=parts.length-1;i>0;i--){const d=parts.slice(0,i).join(path.sep);if(d&&(fs.existsSync(d+'/Cargo.toml')||fs.existsSync(d+'/package.json')||fs.existsSync(d+'/go.mod'))){proj=d;break;}}if(proj){try{const r2=execSync('node '+CLI+' --project '+JSON.stringify(proj),{encoding:'utf-8',stdio:['ignore','pipe','pipe']});process.stdout.write(r2);}catch(e){process.stdout.write(e.stdout||'');blocked=true;}}}if(blocked)process.exit(1);\"",
+            "command": "node -e \"const path=require('path');const fs=require('fs');const {execSync}=require('child_process');const args=JSON.parse(process.env.CLAUDE_TOOL_ARGS||'{}');const fp=args.file_path||args.path||'';const exts=['.rs','.ts','.tsx','.go','.java','.py','.zig','.js'];const CLI='/your/path/to/minimax-precision-mcp/dist/validate-cli.js';let blocked=false;let out='';if(fp&&exts.includes(path.extname(fp))&&fs.existsSync(CLI)){try{out+=execSync('node '+CLI+' --file '+JSON.stringify(fp),{encoding:'utf-8',stdio:['ignore','pipe','pipe']});}catch(e){out+=(e.stdout||'');blocked=true;}let proj='';const parts=path.resolve(fp).split(path.sep);for(let i=parts.length-1;i>0;i--){const d=parts.slice(0,i).join(path.sep);if(d&&(fs.existsSync(d+'/Cargo.toml')||fs.existsSync(d+'/package.json')||fs.existsSync(d+'/go.mod'))){proj=d;break;}}if(proj){try{out+=execSync('node '+CLI+' --project '+JSON.stringify(proj),{encoding:'utf-8',stdio:['ignore','pipe','pipe']});}catch(e){out+=(e.stdout||'');blocked=true;}}}if(blocked){process.stderr.write(out);process.exit(2);}else{if(out)process.stdout.write(out);process.exit(0);}\"",
             "statusMessage": "MCP gate check..."
           }
         ]
@@ -360,7 +360,7 @@ Create or update `~/.claude/settings.json`, replacing `/your/path/to` with your 
         "hooks": [
           {
             "type": "command",
-            "command": "node -e \"const path=require('path');const fs=require('fs');const {execSync}=require('child_process');const CLI='/your/path/to/minimax-precision-mcp/dist/validate-cli.js';if(!fs.existsSync(CLI))process.exit(0);const parts=path.resolve(process.cwd()).split(path.sep);let proj='';for(let i=parts.length;i>0;i--){const d=parts.slice(0,i).join(path.sep);if(d&&(fs.existsSync(d+'/Cargo.toml')||fs.existsSync(d+'/package.json')||fs.existsSync(d+'/go.mod'))){proj=d;break;}}if(!proj)process.exit(0);try{execSync('node '+CLI+' --project '+JSON.stringify(proj),{encoding:'utf-8',stdio:['ignore','pipe','pipe']});process.exit(0);}catch(e){process.stdout.write(e.stdout||'');process.exit(1);}\"",
+            "command": "node -e \"const path=require('path');const fs=require('fs');const {execSync}=require('child_process');const CLI='/your/path/to/minimax-precision-mcp/dist/validate-cli.js';if(!fs.existsSync(CLI))process.exit(0);const parts=path.resolve(process.cwd()).split(path.sep);let proj='';for(let i=parts.length;i>0;i--){const d=parts.slice(0,i).join(path.sep);if(d&&(fs.existsSync(d+'/Cargo.toml')||fs.existsSync(d+'/package.json')||fs.existsSync(d+'/go.mod'))){proj=d;break;}}if(!proj)process.exit(0);try{execSync('node '+CLI+' --gate '+JSON.stringify(proj),{encoding:'utf-8',stdio:['ignore','pipe','pipe']});process.exit(0);}catch(e){process.stdout.write(JSON.stringify({decision:'block',reason:(e.stdout||'MCP gate: blockers found')}));process.exit(0);}\"",
             "statusMessage": "MCP final architecture check..."
           }
         ]
@@ -370,9 +370,14 @@ Create or update `~/.claude/settings.json`, replacing `/your/path/to` with your 
 }
 ```
 
-**Critical:** both hooks exit **1** when blockers are found.
-- PostToolUse exit 1 → Claude Code injects the output as mandatory feedback; the model must address it before its next action
-- Stop exit 1 → Claude Code rejects the stop; the output is sent back as a new message the model must respond to before it can end
+**Exit code reference (per official Claude Code docs):**
+
+| Hook | Blockers found | No blockers | Effect |
+|------|---------------|-------------|--------|
+| PostToolUse | `exit 2` + write stderr | `exit 0` | exit 2 → stderr injected back to model as error message |
+| Stop | `exit 0` + stdout JSON `{"decision":"block","reason":"..."}` | `exit 0` | JSON decision:block → stop is rejected, reason sent back to model |
+
+**Note:** `exit 1` is non-blocking in both hook types — the model sees nothing. The old configuration used exit 1 everywhere, which is why it had no effect.
 
 #### Step 5 (optional): Install the `/mcp-gate` skill
 
@@ -391,25 +396,25 @@ Type `/mcp-gate` in Claude Code to manually trigger a full validation pass.
 AI writes/edits code
       ↓  Write/Edit tool executes
 [PostToolUse Hook fires automatically]
-  ├─ --file <path>   → file-level checks (placeholder, error_handling, data_flow...)
-  └─ --project <dir> → architecture-level checks (dead_module, missing_tests...)
+  ├─ --file <path>  → file-level checks (placeholder, error_handling, data_flow...)
+  └─ --project <dir>→ architecture-level checks (dead_module, missing_tests...)
       ↓
 [MCP ✅ PASSED]  → exit 0 → continue to next file
-[MCP ❌ BLOCKED] → exit 1 → Claude Code forces feedback; model must fix before continuing
+[MCP ❌ BLOCKED] → exit 2 + stderr → output injected to model as error; model must fix before continuing
 
       ↓  model tries to finish the turn
 [Stop Hook fires automatically]
-  └─ --project <dir> → final architecture check
+  └─ --gate <dir> → full file + architecture check
       ↓
 [All passed] → exit 0 → model ends normally
-[Blockers found] → exit 1 → Claude Code rejects stop; output sent back as new message
+[Blockers found] → exit 0 + JSON {"decision":"block"} → stop rejected; reason sent back as new message
 ```
 
 ---
 
 ### Example intercepts
 
-**File-level (PostToolUse, exit 1):**
+**File-level (PostToolUse, exit 2 + stderr):**
 
 ```
 [MCP ❌ BLOCKED] src/agent.rs — 2 issues must be fixed:
@@ -426,7 +431,7 @@ AI writes/edits code
 ╚══════════════════════════════════════════════════════════════════╝
 ```
 
-**Architecture-level (Stop Hook, exit 1 blocks the stop):**
+**Architecture-level (Stop Hook, exit 0 + JSON decision:block):**
 
 ```
 [MCP ❌ BLOCKED] PROJECT — 2 architecture issues must be fixed:
